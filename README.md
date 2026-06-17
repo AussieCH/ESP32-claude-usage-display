@@ -1,5 +1,12 @@
 # Claude Usage Dashboard — ESP32-S3
 
+![ESP32-S3](https://img.shields.io/badge/ESP32--S3-N16R8-blue?style=flat-square)
+![PlatformIO](https://img.shields.io/badge/PlatformIO-Arduino-orange?style=flat-square)
+![SSD1306](https://img.shields.io/badge/SSD1306-128x64_OLED-white?style=flat-square)
+![WiFi](https://img.shields.io/badge/WiFi-AP+STA-teal?style=flat-square)
+![claude.ai](https://img.shields.io/badge/claude.ai-Direct_HTTPS-d97757?style=flat-square)
+![License](https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square)
+
 A physical dashboard that displays your Claude.ai usage limits on a 128×64 OLED screen. Shows the current 5-hour session usage, 7-day cap, and live countdown to reset — updated automatically. No API key required.
 
 ---
