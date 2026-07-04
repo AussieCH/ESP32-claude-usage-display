@@ -1,0 +1,25 @@
+# systemd-Unit für Betrieb ohne Docker (z.B. Raspberry Pi, VM)
+# Installation:
+#   sudo cp claude_usage_proxy.py /opt/claude-usage-proxy/
+#   sudo cp claude-usage-proxy.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now claude-usage-proxy
+[Unit]
+Description=Claude usage proxy for ESP32 dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=claude-proxy
+Environment=AUTH_TOKEN=CHANGE-ME-long-random-string
+Environment=CREDENTIALS_FILE=/opt/claude-usage-proxy/.credentials.json
+Environment=CACHE_SECONDS=180
+ExecStart=/usr/bin/python3 /opt/claude-usage-proxy/claude_usage_proxy.py
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/claude-usage-proxy
+
+[Install]
+WantedBy=multi-user.target

@@ -8,6 +8,8 @@ struct Settings {
     char     wifiSsid[64];    // home WiFi SSID (needed for internet access)
     char     wifiPassword[64];
     char     apPassword[33];  // this device's AP password (min 8 chars)
+    char     proxyUrl[160];   // usage proxy URL (http://... or https://...); empty = legacy claude.ai mode
+    char     proxyToken[96];  // Bearer token for the proxy (optional)
     uint32_t refreshMs;
     bool     showUsagePct;    // show primary utilization % (5h or 7d)
     bool     showProgressBar;

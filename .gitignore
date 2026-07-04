@@ -17,3 +17,7 @@ backend/
 secrets.h
 *.env
 .env*
+
+# Python bytecode (proxy)
+__pycache__/
+*.pyc

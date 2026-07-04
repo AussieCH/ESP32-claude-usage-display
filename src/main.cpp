@@ -20,10 +20,15 @@ void setup() {
     Serial.begin(115200);
     delay(500);
 
+    // T-Display S3 buttons: BOOT (GPIO0) = force refresh,
+    // KEY (GPIO14) = cycle backlight brightness. Both active-low.
+    pinMode(PIN_BTN_BOOT, INPUT_PULLUP);
+    pinMode(PIN_BTN_KEY,  INPUT_PULLUP);
+
     settingsInit();
 
     if (!displayInit()) {
-        Serial.println("[Display] OLED init failed — check SDA/SCL wiring");
+        Serial.println("[Display] LCD init failed — sprite allocation needs PSRAM");
     }
     displayShowStatus("Booting...");
 
@@ -81,6 +86,16 @@ void loop() {
             displayShowError("Set WiFi SSID");
         } else if (!wifiIsConnected()) {
             displayShowError("WiFi connecting");
+        } else if (s.proxyUrl[0]) {
+            // Proxy mode: local/Tailscale usage proxy, no cookie needed
+            if (apiFetchProxy(g_usageData, s.proxyUrl, s.proxyToken)) {
+                displayRender(g_usageData, s);
+                Serial.printf("[Main] (proxy) 5h:%d%% 7d:%d%%\n",
+                    g_usageData.fiveHour.utilization,
+                    g_usageData.sevenDay.utilization);
+            } else {
+                displayShowError("Proxy Error");
+            }
         } else if (!s.sessionKey[0]) {
             displayShowError("Set session key");
         } else {
@@ -99,6 +114,26 @@ void loop() {
             }
         }
     }
+
+    // Buttons (polled at loop rate; 100 ms delay below doubles as debounce)
+    static bool prevBoot = true, prevKey = true;
+    static const uint8_t BL_STEPS[] = { 100, 60, 25, 5 };
+    static uint8_t blIdx = 0;
+
+    bool boot = digitalRead(PIN_BTN_BOOT);
+    bool key  = digitalRead(PIN_BTN_KEY);
+
+    if (prevBoot && !boot) {          // falling edge → force refresh
+        g_forceRefresh = true;
+        Serial.println("[Btn] BOOT pressed — forcing refresh");
+    }
+    if (prevKey && !key) {            // falling edge → next brightness step
+        blIdx = (blIdx + 1) % (sizeof(BL_STEPS) / sizeof(BL_STEPS[0]));
+        displaySetBrightness(BL_STEPS[blIdx]);
+        Serial.printf("[Btn] KEY pressed — backlight %d%%\n", BL_STEPS[blIdx]);
+    }
+    prevBoot = boot;
+    prevKey  = key;
 
     displayTick();
     delay(100);
