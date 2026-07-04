@@ -186,9 +186,41 @@ Standard Arduinos (Uno, Nano, Mega) have no WiFi and cannot run this project. Bo
 
 After flashing, the device starts a WiFi access point named **ESP32-Claude-Dashboard**.
 
-### Step 1 — Get your Claude session cookie
+### Step 1 — Connect to the device and set your WiFi
 
-Do this **before** connecting to the device AP, while on your normal WiFi:
+1. Connect to WiFi **ESP32-Claude-Dashboard** (password: `dashboard1`)
+2. Open a browser and go to `http://192.168.4.1`
+3. Under **Connection Settings**, fill in:
+   - **Home WiFi SSID** — your home router network name
+   - **Home WiFi Password** — your home router password
+
+Now pick **one** data source in Step 2 — proxy (recommended) or the legacy cookie.
+
+### Step 2a — Proxy mode (recommended)
+
+Run the usage proxy on a host in your LAN — a Home Assistant box, Raspberry Pi
+or NAS is ideal — and let the ESP32 poll that instead of claude.ai. Your Claude
+token never leaves your LAN, there are **no credentials on the device**, and it
+sidesteps the `setInsecure()` issue of the legacy path entirely (the ESP32 talks
+plain HTTP to a LAN host, or HTTPS verified against the built-in ISRG Root X1
+for a Tailscale Funnel URL).
+
+1. Set up the proxy — see [`proxy/README.md`](proxy/README.md), or the
+   [Status retrieval via a Home Assistant proxy](#status-retrieval-via-a-home-assistant-proxy)
+   section above for the Home Assistant flow. It polls Anthropic's OAuth usage
+   endpoint (same source as Claude Code's `/usage`) every ≥180 s, handles token
+   refresh, and serves a slim JSON.
+2. In the portal, under **Connection Settings**, fill in:
+   - **Usage Proxy URL** — e.g. `http://192.168.1.10:8787/usage` (LAN) or
+     `https://<node>.<tailnet>.ts.net/usage` (Tailscale Funnel)
+   - **Proxy Bearer Token** — only if the proxy has `AUTH_TOKEN` set
+3. Leave the **Claude Cookie Header** empty. Click **Save Settings**.
+
+### Step 2b — Legacy cookie mode (fallback)
+
+Use this only if you don't want to run a proxy. The ESP32 impersonates your
+logged-in browser session by calling claude.ai directly. Grab the cookie
+**before** connecting to the device AP, while on your normal WiFi:
 
 1. Open [claude.ai](https://claude.ai) in Chrome and make sure you are logged in
 2. Open DevTools: `F12` (or `Ctrl+Shift+I`)
@@ -205,19 +237,17 @@ Cookie: sessionKey=sk-ant-...; __cf_bm=...; other=...
         ^^^^^ copy this entire value
 ```
 
-> **Why this approach?** The ESP32 impersonates a logged-in browser session. The cookie is valid as long as you stay logged in to claude.ai. If you log out or the session expires, repeat this step.
+Then paste it into **Claude Cookie Header** in the portal and click **Save
+Settings**, leaving the proxy URL empty.
 
-### Step 2 — Configure the device
+> **Caveat:** the cookie is valid only as long as you stay logged in to
+> claude.ai — if you log out or the session expires, repeat this. This path
+> also uses `setInsecure()` (no TLS verification); see [Security Notes](#security-notes).
 
-1. Connect to WiFi **ESP32-Claude-Dashboard** (password: `dashboard1`)
-2. Open a browser and go to `http://192.168.4.1`
-3. Under **Connection Settings**, fill in:
-   - **Home WiFi SSID** — your home router network name
-   - **Home WiFi Password** — your home router password
-   - **Claude Cookie Header** — paste the full cookie value from Step 1
-4. Click **Save Settings**
+---
 
-The device connects to your home WiFi and fetches live data within ~10 seconds. The display updates automatically.
+Whichever data source you pick, the device connects to your home WiFi and
+fetches live data within ~10 seconds; the display then updates automatically.
 
 > After saving, the AP stays running. You can return to your home WiFi and still reach the portal at `http://192.168.4.1` while connected to the ESP32-Claude-Dashboard AP.
 
@@ -259,7 +289,7 @@ Connect to the ESP32-Claude-Dashboard AP and open `http://192.168.4.1`.
 |---|---|
 | **Live Preview** | Canvas rendering of the current OLED layout, updates every 30 s |
 | **Display Settings** | Toggle each row on/off |
-| **Connection Settings** | WiFi credentials, session cookie, refresh interval, AP password |
+| **Connection Settings** | WiFi credentials, usage proxy URL + token, session cookie (legacy), refresh interval, AP password |
 | **Refresh Data** | Force an immediate fetch |
 | **Reset Defaults** | Wipe all settings back to factory defaults |
 
@@ -271,9 +301,11 @@ Connect to the ESP32-Claude-Dashboard AP and open `http://192.168.4.1`.
 
 | Setting | Default | Description |
 |---|---|---|
-| Refresh interval | 30 000 ms | How often to poll claude.ai |
+| Usage Proxy URL | *(empty)* | Proxy endpoint; when set, the device uses proxy mode instead of the cookie |
+| Proxy Bearer Token | *(empty)* | Optional `AUTH_TOKEN` for the proxy |
+| Refresh interval | 30 000 ms | How often the device polls its data source (proxy or claude.ai) |
 | AP password | `dashboard1` | Password for the device WiFi AP |
-| Session cookie | *(empty)* | Full Cookie header from claude.ai DevTools |
+| Session cookie | *(empty)* | Legacy mode: full Cookie header from claude.ai DevTools |
 | Home WiFi SSID | *(empty)* | Your home router — required for internet access |
 
 ---
@@ -294,12 +326,18 @@ Connect to the ESP32-Claude-Dashboard AP and open `http://192.168.4.1`.
 **Display shows `Set WiFi SSID`**
 - Open the portal at `http://192.168.4.1` and enter your home WiFi credentials
 
-**Display shows `Set session key`**
-- Follow Step 1 above and paste the cookie into the portal
+**Display shows `Set session key`** (legacy mode only)
+- Either paste a cookie (Step 2b) or, preferably, set a **Usage Proxy URL** (Step 2a)
 
-**Display shows `API Error`**
+**Display shows `Proxy Error`** (proxy mode)
+- Check the proxy is reachable: `curl http://<proxy-host>:8787/health` from your LAN
+- If the URL is `https://…ts.net`, wait ~15–30 s after boot — cert verification needs NTP time first
+- Verify the **Proxy Bearer Token** matches the proxy's `AUTH_TOKEN`
+- Open the Serial Monitor (115200 baud) in PlatformIO for the HTTP status code
+
+**Display shows `API Error`** (legacy mode)
 - Click **Refresh Data** in the portal and check the Org ID field populates
-- The session cookie may have expired — repeat Step 1
+- The session cookie may have expired — repeat Step 2b
 - Open the Serial Monitor (115200 baud) in PlatformIO for detailed HTTP error codes
 
 **Display shows `WiFi connecting`**
@@ -314,13 +352,25 @@ Connect to the ESP32-Claude-Dashboard AP and open `http://192.168.4.1`.
 ## Architecture
 
 ```
-claude.ai  ──HTTPS──>  ESP32-S3  ──I2C──>  OLED
-             (session cookie)
-                  |
-                  └──WiFi AP──>  Browser (192.168.4.1)
+Proxy mode (recommended):
+  api.anthropic.com/oauth/usage ──> Proxy (LAN/HA host) ──HTTP(S)──> ESP32-S3 ──> LCD
+                          (token stays on the proxy)         (no credentials on device)
+
+Legacy mode:
+  claude.ai ──HTTPS (session cookie, setInsecure)──> ESP32-S3 ──> LCD
+
+                                      ESP32-S3 ──WiFi AP──> Browser (192.168.4.1)
 ```
 
-The ESP32 calls `claude.ai/api/organizations/{org}/usage` directly using your browser session cookie. No backend server, no API key, no cloud service required. The org UUID is auto-discovered on first fetch and cached in flash storage.
+- **Proxy mode:** the ESP32 only ever talks to your local/Tailscale proxy, which
+  polls Anthropic's OAuth usage endpoint (the same source as Claude Code's
+  `/usage`) and holds the credentials. No Claude token on the device; HTTPS proxy
+  URLs are verified against the built-in ISRG Root X1.
+- **Legacy mode:** the ESP32 calls `claude.ai/api/organizations/{org}/usage`
+  directly with your browser session cookie (via `setInsecure()`). The org UUID is
+  auto-discovered on first fetch and cached in flash storage.
+
+Either way there is no backend server, no API key, and no cloud service.
 
 ---
 
@@ -328,9 +378,9 @@ The ESP32 calls `claude.ai/api/organizations/{org}/usage` directly using your br
 
 **Change the default AP password.** The device ships with AP password `dashboard1`. Anyone within WiFi range who knows the password can open the settings portal and replace your session cookie or WiFi credentials. Change it to something strong in the web portal under *Connection Settings → AP Password*.
 
-**No TLS certificate verification.** The ESP32 connects to `claude.ai` with `setInsecure()` because loading a full CA certificate bundle requires significant flash space. In practice this means a machine-in-the-middle on your local network could intercept the session cookie in transit. On a trusted home/office network this risk is very low.
+**No TLS certificate verification — legacy mode only.** In legacy cookie mode the ESP32 connects to `claude.ai` with `setInsecure()` (loading a full CA bundle would cost significant flash), so a machine-in-the-middle on your local network could in principle intercept the session cookie. **Proxy mode eliminates this:** an `http://` LAN proxy carries no Claude credentials at all, and an `https://` proxy URL (e.g. Tailscale Funnel) *is* verified against the built-in ISRG Root X1 — no `setInsecure()`.
 
-**Your credentials live on the device, never in code.** The session cookie, WiFi password, and AP password are stored only in the ESP32's NVS (encrypted flash partition) — they are never written to any source file, config file, or anywhere that would appear in this repository.
+**Your credentials live on the device only in legacy mode.** In proxy mode the Claude token never leaves the proxy host — the device holds at most an optional proxy Bearer token. Any secrets (session cookie, WiFi password, AP password, proxy token) are stored only in the ESP32's NVS (encrypted flash partition) — never in any source or config file in this repository.
 
 **The settings portal is HTTP, not HTTPS.** Traffic between your browser and `192.168.4.1` is unencrypted. Use the portal only while connected to the device's own AP, not over a shared network.
 
