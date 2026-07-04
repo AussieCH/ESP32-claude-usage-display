@@ -160,7 +160,7 @@ The device connects to your home WiFi and fetches live data within ~10 seconds. 
 |---|---|
 | **Primary %** | 5-hour session usage (or 7-day if no 5h limit on your plan) |
 | **Progress bar** | Visual fill for the primary metric |
-| **7-day %** | Weekly usage cap |
+| **7-day %** | Weekly usage cap, with the current model next to it (`7d: 22% - cur: Fable`) |
 | **7-day Opus %** | Weekly Opus model usage (Pro plan only) |
 | **Reset in: 2h15m** | Live countdown to next usage reset (NTP-synced) |
 | **Face icon** | Animated face in the top-right corner that reacts to your usage |
