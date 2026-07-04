@@ -1,4 +1,4 @@
-# Claude Usage Dashboard — ESP32-S3
+# Claude Usage Dashboard — LILYGO T-Display S3
 
 ![ESP32-S3](https://img.shields.io/badge/ESP32--S3-N16R8-blue?style=flat-square)
 ![PlatformIO](https://img.shields.io/badge/PlatformIO-Arduino-orange?style=flat-square)
@@ -7,34 +7,28 @@
 ![claude.ai](https://img.shields.io/badge/claude.ai-Direct_HTTPS-d97757?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square)
 
-A physical dashboard that displays your Claude.ai usage limits on a 128×64 OLED screen. Shows the current 5-hour session usage, 7-day cap, and live countdown to reset — updated automatically. No API key required.
+A physical dashboard that displays your Claude.ai usage limits on the LILYGO T-Display S3 (1.9" color LCD, 320×170). Adapted from the original SSD1306 OLED version. Shows the current 5-hour session usage, 7-day cap, and live countdown to reset — updated automatically. No API key required.
 
 ---
 
 ## Hardware
 
 | Component | Notes |
-|---|---|
-| ESP32-S3-N16R8 (or any ESP32-S3) | 16 MB flash, 8 MB PSRAM |
-| SSD1306 OLED 128×64 I2C | 0.96" or 1.3" both work |
+| --- | --- |
+| LILYGO T-Display S3 | ESP32-S3, 16 MB flash, 8 MB OPI PSRAM, integrated 1.9" ST7789 LCD (170×320, 8-bit parallel) |
 | USB-C cable | For flashing and power |
 
----
+No wiring needed — the display is on-board. The LCD pin mapping (8-bit
+parallel bus, D0–D7 on GPIO 39–48, WR=8, RD=9, DC=7, CS=6, RST=5, BL=38)
+is configured via TFT_eSPI build flags in `platformio.ini`. GPIO 15 is
+driven HIGH at boot to enable the LCD power rail (required on battery).
 
-## Wiring
+## Buttons
 
-```
-OLED         ESP32-S3
-────         ────────
-VCC    →     3.3V
-GND    →     GND
-SDA    →     GPIO 8
-SCL    →     GPIO 9
-```
-
-> **Note:** GPIO 22 does not exist on ESP32-S3. Use GPIO 8/9 for I2C.
-
----
+| Button | GPIO | Function |
+| --- | --- | --- |
+| BOOT (left of USB) | 0 | Force an immediate data refresh |
+| KEY (right of USB) | 14 | Cycle backlight brightness (100 → 60 → 25 → 5 %) |
 
 ## Using a Different Board
 
@@ -148,7 +142,7 @@ Cookie: sessionKey=sk-ant-...; __cf_bm=...; other=...
    - **Claude Cookie Header** — paste the full cookie value from Step 1
 4. Click **Save Settings**
 
-The device connects to your home WiFi and fetches live data within ~10 seconds. The OLED updates automatically.
+The device connects to your home WiFi and fetches live data within ~10 seconds. The display updates automatically.
 
 > After saving, the AP stays running. You can return to your home WiFi and still reach the portal at `http://192.168.4.1` while connected to the ESP32-Claude-Dashboard AP.
 
@@ -211,7 +205,7 @@ Connect to the ESP32-Claude-Dashboard AP and open `http://192.168.4.1`.
 
 ## Troubleshooting
 
-**OLED shows nothing**
+**Display shows nothing**
 - Check wiring: SDA → GPIO 8, SCL → GPIO 9, VCC → 3.3V (not 5V)
 - Verify the I2C address is `0x3C`; some modules use `0x3D` — edit `config.h` if needed
 
@@ -222,18 +216,18 @@ Connect to the ESP32-Claude-Dashboard AP and open `http://192.168.4.1`.
   ```
   Then rebuild — PlatformIO re-downloads it automatically.
 
-**OLED shows `Set WiFi SSID`**
+**Display shows `Set WiFi SSID`**
 - Open the portal at `http://192.168.4.1` and enter your home WiFi credentials
 
-**OLED shows `Set session key`**
+**Display shows `Set session key`**
 - Follow Step 1 above and paste the cookie into the portal
 
-**OLED shows `API Error`**
+**Display shows `API Error`**
 - Click **Refresh Data** in the portal and check the Org ID field populates
 - The session cookie may have expired — repeat Step 1
 - Open the Serial Monitor (115200 baud) in PlatformIO for detailed HTTP error codes
 
-**OLED shows `WiFi connecting`**
+**Display shows `WiFi connecting`**
 - Wait 15–20 seconds after powering on; the device retries automatically
 - Verify SSID and password in the portal
 
