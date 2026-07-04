@@ -127,6 +127,16 @@ bool apiFetch(UsageData& out, const char* sessionKey, char* orgId, size_t orgIdL
     parseBlock(doc["seven_day"].as<JsonObject>(), out.sevenDay);
     parseBlock(doc["seven_day_opus"].as<JsonObject>(), out.sevenDayOpus);
 
+    // Current model: the model-scoped limit carries its display name
+    out.model[0] = '\0';
+    for (JsonObject lim : doc["limits"].as<JsonArray>()) {
+        const char* name = lim["scope"]["model"]["display_name"];
+        if (name && name[0]) {
+            snprintf(out.model, sizeof(out.model), "%s", name);
+            break;
+        }
+    }
+
     unsigned long sec = millis() / 1000;
     snprintf(out.timestamp, sizeof(out.timestamp), "T+%02lu:%02lu:%02lu",
              sec / 3600, (sec % 3600) / 60, sec % 60);

@@ -10,6 +10,14 @@
 static Adafruit_SSD1306 g_oled(OLED_WIDTH, OLED_HEIGHT, &Wire, -1);
 static bool g_ready = false;
 
+// Cached render inputs so the wink animation can redraw between fetches
+static UsageData g_lastData;
+static Settings  g_lastSettings;
+static bool      g_hasData = false;
+static uint8_t   g_animState = 0;
+
+static void renderFrame();
+
 // ── Time helpers ─────────────────────────────────────────────────────
 
 // Parse ISO 8601 UTC string and return seconds until that moment.
@@ -39,6 +47,67 @@ static void formatCountdown(int32_t secs, char* buf, size_t len) {
     else                  snprintf(buf, len, "%dh%02dm", (int)(secs / 3600), (int)((secs % 3600) / 60));
 }
 
+// ── Corner icon (32x18, cropped from OLED Pixel Studio export) ──────
+static const unsigned char CORNER_ICON[] PROGMEM = {
+  0x1F, 0xFF, 0xFF, 0xF0,
+  0x10, 0x00, 0x00, 0x10,
+  0x10, 0x00, 0x00, 0x10,
+  0x11, 0xF8, 0x3F, 0x10,
+  0x10, 0x00, 0x00, 0x10,
+  0x10, 0xF0, 0x1E, 0x10,
+  0x10, 0x91, 0x12, 0x10,
+  0x10, 0xF1, 0x1E, 0x10,
+  0x10, 0x01, 0x00, 0x10,
+  0x10, 0x00, 0x00, 0x10,
+  0x10, 0x00, 0x00, 0x10,
+  0x10, 0x7F, 0xFC, 0x10,
+  0x10, 0x80, 0x02, 0x10,
+  0x10, 0x7F, 0xFC, 0x10,
+  0x10, 0x00, 0x00, 0x10,
+  0x10, 0x03, 0x80, 0x10,
+  0x10, 0x00, 0x00, 0x10,
+  0x1F, 0xFF, 0xFF, 0xF0,
+};
+static const int ICON_W = 32, ICON_H = 18;
+
+// Wink animation: eyes live at source rows 5-7, cols 8-11 (left) and
+// 19-22 (right). A closed eye is drawn as a lid line on row 6.
+static bool g_leftEyeClosed  = false;
+static bool g_rightEyeClosed = false;
+
+// Mouth by usage: 0 smile (<30%), 1 open = original bitmap (30-60%),
+// 2 closed line (60-80%), 3 sad (>80%). Mouth lives at rows 11-13.
+static uint8_t g_mouth = 1;
+
+static bool iconPixel(int sx, int sy) {
+    bool inLeft  = sx >= 8  && sx <= 11 && sy >= 5 && sy <= 7;
+    bool inRight = sx >= 19 && sx <= 22 && sy >= 5 && sy <= 7;
+    if ((inLeft && g_leftEyeClosed) || (inRight && g_rightEyeClosed))
+        return sy == 6;
+    if (g_mouth != 1 && sx >= 8 && sx <= 22 && sy >= 11 && sy <= 13) {
+        switch (g_mouth) {
+            case 0: return (sy == 12 && (sx == 9 || sx == 21)) ||
+                           (sy == 13 && sx >= 10 && sx <= 20);      // corners up
+            case 2: return  sy == 12 && sx >= 9 && sx <= 21;        // flat line
+            case 3: return (sy == 12 && sx >= 10 && sx <= 20) ||
+                           (sy == 13 && (sx == 9 || sx == 21));     // corners down
+        }
+    }
+    return pgm_read_byte(&CORNER_ICON[sy * 4 + sx / 8]) & (0x80 >> (sx & 7));
+}
+
+// Nearest-neighbor scaled draw (drawBitmap can't scale).
+static void drawIconScaled(int x0, int y0, int w, int h) {
+    for (int dy = 0; dy < h; dy++) {
+        int sy = dy * ICON_H / h;
+        for (int dx = 0; dx < w; dx++) {
+            int sx = dx * ICON_W / w;
+            if (iconPixel(sx, sy))
+                g_oled.drawPixel(x0 + dx, y0 + dy, SSD1306_WHITE);
+        }
+    }
+}
+
 // ── Display ──────────────────────────────────────────────────────────
 
 bool displayInit() {
@@ -50,8 +119,13 @@ bool displayInit() {
     return true;
 }
 
+const uint8_t* displayGetBuffer() {
+    return g_oled.getBuffer();
+}
+
 void displayShowStatus(const char* msg) {
     if (!g_ready) return;
+    g_hasData = false;   // stop animation ticks overwriting this screen
     g_oled.clearDisplay();
     g_oled.setTextSize(1);
     g_oled.setTextColor(SSD1306_WHITE);
@@ -62,6 +136,7 @@ void displayShowStatus(const char* msg) {
 
 void displayShowError(const char* msg) {
     if (!g_ready) return;
+    g_hasData = false;   // stop animation ticks overwriting this screen
     g_oled.clearDisplay();
     g_oled.setTextSize(1);
     g_oled.setTextColor(SSD1306_WHITE);
@@ -81,6 +156,33 @@ static void drawProgressBar(int x, int y, int w, int h, uint8_t pct) {
 
 void displayRender(const UsageData& data, const Settings& s) {
     if (!g_ready) return;
+    g_lastData     = data;
+    g_lastSettings = s;
+    g_hasData      = true;
+    renderFrame();
+}
+
+// Wink cycle, repeats every 7 s: left eye closes, then right, then they
+// reopen in the same order, 500 ms per step.
+void displayTick() {
+    if (!g_ready || !g_hasData) return;
+    uint32_t p = millis() % 7000;
+    uint8_t st = (p < 500) ? 1 : (p < 1000) ? 2 : (p < 1500) ? 3 : 0;
+    if (st == g_animState) return;
+    g_animState      = st;
+    g_leftEyeClosed  = (st == 1 || st == 2);
+    g_rightEyeClosed = (st == 2 || st == 3);
+    renderFrame();
+}
+
+static void renderFrame() {
+    const UsageData& data = g_lastData;
+    const Settings&  s    = g_lastSettings;
+
+    const UsageBlock& pm = data.fiveHour.available ? data.fiveHour : data.sevenDay;
+    uint8_t u = pm.available ? pm.utilization : 0;
+    g_mouth = (u < 30) ? 0 : (u < 60) ? 1 : (u <= 80) ? 2 : 3;
+
     g_oled.clearDisplay();
     g_oled.setTextColor(SSD1306_WHITE);
 
@@ -90,6 +192,9 @@ void displayRender(const UsageData& data, const Settings& s) {
     g_oled.setTextSize(1);
     g_oled.setCursor(0, y);
     g_oled.print("CLAUDE USAGE");
+    // Corner icon at ~1.3x (42x24): clear of header/metric text (x<=72)
+    // and the progress bar (y>=31).
+    drawIconScaled(OLED_WIDTH - 42, 0, 42, 24);
     y += 13;
 
     // Primary metric: 5-hour if available, else 7-day
@@ -117,6 +222,11 @@ void displayRender(const UsageData& data, const Settings& s) {
         g_oled.print("7d: ");
         g_oled.print(data.sevenDay.utilization);
         g_oled.print("%");
+        // "cur" not "current": full word overflows 128px (21 chars max at size 1)
+        if (data.model[0]) {
+            g_oled.print(" - cur: ");
+            g_oled.print(data.model);
+        }
         y += 9;
     }
 

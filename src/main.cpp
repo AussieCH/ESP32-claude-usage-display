@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <WiFi.h>
 #include <time.h>
 #include "config/config.h"
 #include "models/usage_data.h"
@@ -35,6 +36,7 @@ void setup() {
         while (!wifiIsConnected() && millis() - t0 < 8000) delay(200);
 
         if (wifiIsConnected()) {
+            Serial.printf("[WiFi] STA IP: %s\n", WiFi.localIP().toString().c_str());
             displayShowStatus("Syncing time...");
             configTime(0, 0, "pool.ntp.org", "time.nist.gov");
             setenv("TZ", "UTC0", 1);
@@ -98,5 +100,6 @@ void loop() {
         }
     }
 
+    displayTick();
     delay(100);
 }
