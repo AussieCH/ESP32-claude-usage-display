@@ -68,6 +68,11 @@ If you already run Home Assistant, its host is the ideal place for the usage
 proxy — it is always on, on your LAN, and can expose the numbers to HA at the
 same time.
 
+> 📖 **Full step-by-step guide:** [docs/home-assistant.md](docs/home-assistant.md)
+> — installing Tailscale in Home Assistant, exposing the proxy to the T-Display
+> via Tailscale Funnel, running the proxy (Docker or a local HA add-on), and the
+> REST sensor. The quick summary below is the short version.
+
 **1. Run the proxy on the HA host.** Deploy [`proxy/`](proxy/) next to Home
 Assistant (Docker/compose or the systemd unit — see [`proxy/README.md`](proxy/README.md)).
 It polls Anthropic's OAuth usage endpoint and serves a slim JSON on port `8787`.
@@ -87,7 +92,7 @@ rest:
   - resource: http://<ha-host>:8787/usage
     headers:
       Authorization: "Bearer <AUTH_TOKEN>"   # omit if AUTH_TOKEN is unset
-    scan_interval: 300                        # keep ≥ 300 s; the endpoint rate-limits hard
+    scan_interval: 180                        # 3 min — matches the proxy cache; don't go lower
     sensor:
       - name: "Claude Usage 5h"
         value_template: "{{ value_json.fiveHour.utilization }}"
