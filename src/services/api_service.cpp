@@ -3,6 +3,7 @@
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include "isrg_root_x1.h"
 #include <string.h>
 #include <Arduino.h>
 
@@ -141,6 +142,80 @@ bool apiFetch(UsageData& out, const char* sessionKey, char* orgId, size_t orgIdL
     snprintf(out.timestamp, sizeof(out.timestamp), "T+%02lu:%02lu:%02lu",
              sec / 3600, (sec % 3600) / 60, sec % 60);
 
+    out.valid = true;
+    return true;
+}
+
+// ── Proxy mode ───────────────────────────────────────────────────────
+// The proxy already returns our exact schema, so parsing is trivial and
+// no session cookie or org discovery is needed.
+
+static void parseProxyBlock(JsonObject obj, UsageBlock& block) {
+    if (obj.isNull()) { block.available = false; block.utilization = 0; block.resetsAt[0] = '\0'; return; }
+    block.available   = obj["available"] | false;
+    block.utilization = (uint8_t)min((int)(obj["utilization"] | 0), 100);
+    snprintf(block.resetsAt, sizeof(block.resetsAt), "%s",
+             (const char*)(obj["resetsAt"] | ""));
+}
+
+bool apiFetchProxy(UsageData& out, const char* url, const char* token) {
+    out.valid = false;
+    if (!url || !url[0]) return false;
+
+    bool https = strncmp(url, "https://", 8) == 0;
+
+    WiFiClientSecure tlsClient;
+    WiFiClient       plainClient;
+    HTTPClient http;
+    bool ok;
+    if (https) {
+        tlsClient.setCACert(ISRG_ROOT_X1);   // verifies e.g. *.ts.net (Let's Encrypt)
+        ok = http.begin(tlsClient, url);
+    } else {
+        ok = http.begin(plainClient, url);
+    }
+    if (!ok) {
+        Serial.printf("[Proxy] begin failed: %s\n", url);
+        return false;
+    }
+    http.setTimeout(10000);
+    http.addHeader("Accept", "application/json");
+    if (token && token[0]) {
+        char auth[112];
+        snprintf(auth, sizeof(auth), "Bearer %s", token);
+        http.addHeader("Authorization", auth);
+    }
+
+    int code = http.GET();
+    if (code != 200) {
+        Serial.printf("[Proxy] HTTP %d for %s\n", code, url);
+        if (code < 0) Serial.printf("[Proxy] error: %s\n", http.errorToString(code).c_str());
+        http.end();
+        return false;
+    }
+    String body = http.getString();
+    http.end();
+
+    JsonDocument doc;
+    if (deserializeJson(doc, body)) {
+        Serial.println("[Proxy] JSON parse error");
+        return false;
+    }
+    if (!(doc["valid"] | false)) {
+        Serial.printf("[Proxy] upstream error: %s\n", (const char*)(doc["error"] | "unknown"));
+        return false;
+    }
+
+    parseProxyBlock(doc["fiveHour"].as<JsonObject>(),     out.fiveHour);
+    parseProxyBlock(doc["sevenDay"].as<JsonObject>(),     out.sevenDay);
+    parseProxyBlock(doc["sevenDayOpus"].as<JsonObject>(), out.sevenDayOpus);
+    snprintf(out.model, sizeof(out.model), "%s", (const char*)(doc["model"] | ""));
+
+    if (doc["stale"] | false) Serial.println("[Proxy] serving stale cache");
+
+    unsigned long sec = millis() / 1000;
+    snprintf(out.timestamp, sizeof(out.timestamp), "T+%02lu:%02lu:%02lu",
+             sec / 3600, (sec % 3600) / 60, sec % 60);
     out.valid = true;
     return true;
 }

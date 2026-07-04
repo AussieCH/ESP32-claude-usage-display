@@ -1,7 +1,6 @@
 #include "web_server.h"
 #include "../storage/settings.h"
 #include "../models/usage_data.h"
-#include "../display/display.h"
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 #include <Arduino.h>
@@ -10,7 +9,7 @@
 static AsyncWebServer g_server(80);
 static UsageData*     g_data = nullptr;
 
-static char   s_postBuf[1200];
+static char   s_postBuf[1500];   // headroom for proxyUrl+proxyToken added in v3
 static size_t s_postBufLen = 0;
 
 static const char HTML_PAGE[] PROGMEM = R"rawhtml(<!DOCTYPE html>
@@ -42,7 +41,7 @@ button{border:none;border-radius:6px;padding:8px 18px;cursor:pointer;font-size:.
 .btn-refresh{background:#1a3d2b;color:#86efac}.btn-refresh:hover{background:#166534}
 #status{font-size:.8rem;margin-top:8px;min-height:1.2em;transition:color .2s}
 #oled-wrap{text-align:center;padding:8px 0}
-canvas{border:2px solid #44403c;border-radius:6px;display:block;margin:0 auto;image-rendering:pixelated}
+canvas{border:2px solid #44403c;border-radius:6px;display:block;margin:0 auto;image-rendering:pixelated;max-width:100%;height:auto}
 .meta{font-size:.75rem;color:#78716c;margin-top:6px;text-align:center}
 </style>
 </head>
@@ -52,7 +51,7 @@ canvas{border:2px solid #44403c;border-radius:6px;display:block;margin:0 auto;im
 <div class="card">
   <h2>Live Preview</h2>
   <div id="oled-wrap">
-    <canvas id="oled" width="384" height="192"></canvas>
+    <canvas id="oled" width="640" height="340"></canvas>
     <div class="meta" id="ts">No data yet</div>
   </div>
 </div>
@@ -80,7 +79,18 @@ canvas{border:2px solid #44403c;border-radius:6px;display:block;margin:0 auto;im
   </div>
 
   <div class="field">
-    <span>Claude Cookie Header</span>
+    <span>Usage Proxy URL (recommended)</span>
+    <input type="text" id="proxyUrl" placeholder="http://192.168.x.x:8787/usage or https://node.tailnet.ts.net/usage">
+    <div class="hint">If set, the device polls your local/Tailscale proxy instead of claude.ai — no cookie needed. See proxy/README.md.</div>
+  </div>
+
+  <div class="field">
+    <span>Proxy Bearer Token</span>
+    <input type="password" id="proxyToken" placeholder="Leave blank to keep current / none">
+  </div>
+
+  <div class="field">
+    <span>Claude Cookie Header (legacy mode)</span>
     <input type="password" id="sessionKey" placeholder="Paste full Cookie header value">
     <div class="hint">Chrome DevTools → Network → any claude.ai request → Request Headers → <b>Cookie</b> → copy full value</div>
   </div>
@@ -109,7 +119,7 @@ canvas{border:2px solid #44403c;border-radius:6px;display:block;margin:0 auto;im
 </div>
 
 <script>
-const S = 3, W = 128, H = 64;
+const S = 2, W = 320, H = 170;
 let cfg = {}, live = {};
 
 function setStatus(msg, ok) {
@@ -129,6 +139,8 @@ async function loadSettings() {
     document.getElementById('show7dOpus').checked     = !!cfg.show7dOpus;
     document.getElementById('showResetTime').checked  = !!cfg.showResetTime;
     document.getElementById('wifiSsid').value    = cfg.wifiSsid   || '';
+    document.getElementById('proxyUrl').value    = cfg.proxyUrl   || '';
+    document.getElementById('proxyToken').value  = '';
     document.getElementById('refreshMs').value   = cfg.refreshMs  || 30000;
     document.getElementById('wifiPassword').value = '';
     document.getElementById('apPassword').value  = '';
@@ -159,14 +171,17 @@ async function saveSettings() {
     show7dOpus:      document.getElementById('show7dOpus').checked,
     showResetTime:   document.getElementById('showResetTime').checked,
     wifiSsid:        document.getElementById('wifiSsid').value.trim(),
+    proxyUrl:        document.getElementById('proxyUrl').value.trim(),
     refreshMs:       parseInt(document.getElementById('refreshMs').value) || 30000,
   };
   const sk = document.getElementById('sessionKey').value.trim();
   const wp = document.getElementById('wifiPassword').value;
   const ap = document.getElementById('apPassword').value;
+  const pt = document.getElementById('proxyToken').value.trim();
   if (sk) body.sessionKey   = sk;
   if (wp) body.wifiPassword = wp;
   if (ap) body.apPassword   = ap;
+  if (pt) body.proxyToken   = pt;
 
   try {
     const r = await fetch('/api/settings', {
@@ -201,9 +216,9 @@ async function refreshNow() {
 function drawPreview() {
   const canvas = document.getElementById('oled');
   const ctx = canvas.getContext('2d');
+  const ORANGE = '#d97757', MUTED = '#a8a29e', TEXT = '#fff';
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W * S, H * S);
-  ctx.fillStyle = '#fff';
 
   const fh = (live.fiveHour || {});
   const sd = (live.sevenDay || {});
@@ -216,65 +231,76 @@ function drawPreview() {
     showResetTime:   document.getElementById('showResetTime').checked,
   };
 
-  let y = 0;
+  // Header + face icon (mirrors drawIconScaled(W-102, 4, 96, 54) in orange)
+  ctx.fillStyle = ORANGE;
+  ctx.font = 'bold ' + (20 * S) + 'px monospace';
+  ctx.fillText('CLAUDE USAGE', 10 * S, 28 * S);
 
-  ctx.font = (7 * S) + 'px monospace';
-  ctx.fillText('CLAUDE USAGE', 0, (y + 7) * S);
-
-  // Corner face icon, mirrors drawIconScaled(86, 0, 42, 24) on the OLED
   const ICON = [0x1FFFFFF0,0x10000010,0x10000010,0x11F83F10,0x10000010,
                 0x10F01E10,0x10911210,0x10F11E10,0x10010010,0x10000010,
                 0x10000010,0x107FFC10,0x10800210,0x107FFC10,0x10000010,
                 0x10038010,0x10000010,0x1FFFFFF0];
-  for (let dy = 0; dy < 24; dy++) {
-    const sy = Math.floor(dy * 18 / 24);
-    for (let dx = 0; dx < 42; dx++) {
-      const sx = Math.floor(dx * 32 / 42);
-      if ((ICON[sy] >>> (31 - sx)) & 1) ctx.fillRect((86 + dx) * S, dy * S, S, S);
+  for (let dy = 0; dy < 54; dy++) {
+    const sy = Math.floor(dy * 18 / 54);
+    for (let dx = 0; dx < 96; dx++) {
+      const sx = Math.floor(dx * 32 / 96);
+      if ((ICON[sy] >>> (31 - sx)) & 1) ctx.fillRect((W - 102 + dx) * S, (4 + dy) * S, S, S);
     }
   }
-  y += 10;
+
+  let y = 40;
 
   if (c.showUsagePct) {
     const primary = fh.available ? fh : sd;
     if (primary.available) {
-      ctx.font = 'bold ' + (14 * S) + 'px monospace';
-      ctx.fillText((primary.utilization || 0) + (fh.available ? '% 5h' : '% 7d'), 0, (y + 14) * S);
-      ctx.font = (7 * S) + 'px monospace';
-      y += 18;
+      const pct = (primary.utilization || 0) + '%';
+      ctx.fillStyle = TEXT;
+      ctx.font = 'bold ' + (42 * S) + 'px monospace';
+      ctx.fillText(pct, 10 * S, (y + 42) * S);
+      const w = ctx.measureText(pct).width;
+      ctx.fillStyle = MUTED;
+      ctx.font = (20 * S) + 'px monospace';
+      ctx.fillText(fh.available ? '5h' : '7d', 10 * S + w + 8 * S, (y + 42) * S);
+      y += 56;
     }
   }
 
   if (c.showProgressBar) {
     const pct = fh.available ? (fh.utilization || 0) : (sd.available ? (sd.utilization || 0) : 0);
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(0.5 * S, (y + 0.5) * S, (W - 1) * S, 7 * S);
-    const fill = Math.round((W - 2) * Math.min(pct, 100) / 100);
-    if (fill > 0) ctx.fillRect(1 * S, (y + 1) * S, fill * S, 5 * S);
-    y += 11;
+    ctx.strokeStyle = MUTED;
+    ctx.lineWidth = S;
+    ctx.strokeRect(10 * S, y * S, (W - 20) * S, 14 * S);
+    ctx.fillStyle = pct > 80 ? '#f87171' : (pct >= 60 ? '#fbbf24' : '#34d399');
+    const fill = Math.round((W - 24) * Math.min(pct, 100) / 100);
+    if (fill > 0) ctx.fillRect(12 * S, (y + 2) * S, fill * S, 10 * S);
+    y += 22;
   }
 
-  ctx.font = (7 * S) + 'px monospace';
+  ctx.font = (18 * S) + 'px monospace';
+  ctx.fillStyle = MUTED;
 
-  if (c.show7dPct && sd.available) {
-    const cur = live.model ? ' - cur: ' + live.model : '';
-    ctx.fillText('7d: ' + (sd.utilization || 0) + '%' + cur, 0, (y + 7) * S);
-    y += 9;
+  if ((c.show7dPct && sd.available) || (c.show7dOpus && so.available)) {
+    let row = '';
+    if (c.show7dPct && sd.available) {
+      row += '7d: ' + (sd.utilization || 0) + '%';
+      if (live.model) row += '  cur: ' + live.model;
+    }
+    if (c.show7dOpus && so.available) row += '  Opus: ' + (so.utilization || 0) + '%';
+    ctx.fillText(row.trim(), 10 * S, (y + 18) * S);
+    y += 30;
   }
 
-  if (c.show7dOpus && so.available) {
-    ctx.fillText('Opus: ' + (so.utilization || 0) + '%', 0, (y + 7) * S);
-    y += 9;
-  }
-
-  if (c.showResetTime && y < H - 8) {
+  if (c.showResetTime && y <= H - 28) {
     const ref = fh.available ? fh : sd;
     if (ref.resetsAt) {
       try {
         const dt = new Date(ref.resetsAt);
-        ctx.fillText('Rst:' + dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}),
-                     0, (y + 7) * S);
+        const label = 'Reset in: ';
+        ctx.fillStyle = MUTED;
+        ctx.fillText(label, 10 * S, (y + 18) * S);
+        ctx.fillStyle = ORANGE;
+        ctx.fillText(dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}),
+                     10 * S + ctx.measureText(label).width, (y + 18) * S);
       } catch(e) {}
     }
   }
@@ -303,6 +329,8 @@ static void handleGetSettings(AsyncWebServerRequest* req) {
     JsonDocument doc;
     doc["sessionKey"]      = "";            // never echoed
     doc["orgId"]           = s.orgId;
+    doc["proxyUrl"]        = s.proxyUrl;
+    doc["proxyToken"]      = "";            // never echoed
     doc["wifiSsid"]        = s.wifiSsid;
     doc["wifiPassword"]    = "";            // never echoed
     doc["apPassword"]      = "";            // never echoed
@@ -357,6 +385,13 @@ static void applySettingsJson(const char* buf, size_t len, AsyncWebServerRequest
                 s.orgId[0] = '\0';  // new key → force org rediscovery
             snprintf(s.sessionKey, sizeof(s.sessionKey), "%s", sk);
         }
+    }
+    if (!doc["proxyUrl"].isNull())
+        snprintf(s.proxyUrl, sizeof(s.proxyUrl), "%s", doc["proxyUrl"].as<const char*>());
+    if (!doc["proxyToken"].isNull()) {
+        const char* pt = doc["proxyToken"].as<const char*>();
+        if (pt && strlen(pt) > 0)
+            snprintf(s.proxyToken, sizeof(s.proxyToken), "%s", pt);
     }
     if (!doc["wifiSsid"].isNull())
         snprintf(s.wifiSsid, sizeof(s.wifiSsid), "%s", doc["wifiSsid"].as<const char*>());
@@ -425,13 +460,6 @@ void webServerStart(UsageData& usageData) {
 
     g_server.on("/api/refresh", HTTP_POST,
         [](AsyncWebServerRequest* req) { handleRefresh(req); });
-
-    // Raw SSD1306 framebuffer (1024 bytes, page-major) for screenshots
-    g_server.on("/api/screen", HTTP_GET, [](AsyncWebServerRequest* req) {
-        const uint8_t* fb = displayGetBuffer();
-        if (!fb) { req->send(503); return; }   // OLED init failed → no buffer
-        req->send(req->beginResponse(200, "application/octet-stream", fb, 1024));
-    });
 
     g_server.onNotFound([](AsyncWebServerRequest* req) { req->send(404); });
     g_server.begin();

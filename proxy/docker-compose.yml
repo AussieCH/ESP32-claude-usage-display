@@ -1,0 +1,15 @@
+services:
+  claude-usage-proxy:
+    build: .
+    container_name: claude-usage-proxy
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      # Pflicht, sobald der Proxy via Tailscale Funnel erreichbar ist:
+      AUTH_TOKEN: "CHANGE-ME-long-random-string"
+      CACHE_SECONDS: "180"
+      # USER_AGENT: "claude-code/2.1.0"
+    volumes:
+      # Claude-Code-Credentials vom Host (Schreibzugriff für Token-Refresh nötig)
+      - ./data:/data
