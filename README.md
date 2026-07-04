@@ -9,6 +9,8 @@
 
 A physical dashboard that displays your Claude.ai usage limits on the LILYGO T-Display S3 (1.9" color LCD, 320×170). Adapted from the original SSD1306 OLED version. Shows the current 5-hour session usage, 7-day cap, and live countdown to reset — updated automatically. No API key required.
 
+![Claude Usage Dashboard on the LILYGO T-Display S3](docs/tdisplay.jpg)
+
 ---
 
 ## Hardware
@@ -266,10 +268,7 @@ All rows are individually toggleable in the web portal under **Display Settings*
 
 ### The Face
 
-![Animated face](docs/oled_face.png)
-*Face concept, shown on the original OLED build — the same face renders in colour on the T-Display.*
-
-A small animated face lives in the top-right corner. It **winks every 7 seconds** (left eye, then right, then they reopen in the same order), and its **mouth follows your usage** — same metric as the primary %:
+A small animated face lives in the top-right corner (see the orange face in the photo above). It **winks every 7 seconds** (left eye, then right, then they reopen in the same order), and its **mouth follows your usage** — same metric as the primary %:
 
 | < 30% | 30–60% | 60–80% | > 80% |
 |:---:|:---:|:---:|:---:|
@@ -395,12 +394,10 @@ MIT
 
 ## Screenshots
 
-### Device display
-![Claude usage on device](docs/minioled.jpg)
-*From the original OLED build — a T-Display S3 photo will replace this.*
-
 ### Web Portal
 ![Claude Dashboard](docs/claude-dashboard.PNG)
+
+The device itself is shown at the [top of this README](#claude-usage-dashboard--lilygo-t-display-s3).
 
 
 
