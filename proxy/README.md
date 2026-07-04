@@ -75,12 +75,17 @@ gegen die eingebaute ISRG Root X1.
 
 ## Home Assistant (optional)
 
+> Ausführliche Schritt-für-Schritt-Anleitung (Tailscale in HA installieren, Proxy
+> als Docker oder lokales HA-Add-on betreiben, via Tailscale Funnel extern fürs
+> T-Display erreichbar machen, REST-Sensor alle 3 Minuten):
+> **[../docs/home-assistant.md](../docs/home-assistant.md)**
+
 ```yaml
 rest:
   - resource: http://<proxy-host>:8787/usage
     headers:
       Authorization: "Bearer <AUTH_TOKEN>"
-    scan_interval: 300
+    scan_interval: 180   # 3 Minuten — passt zum Proxy-Cache
     sensor:
       - name: "Claude Usage 5h"
         value_template: "{{ value_json.fiveHour.utilization }}"
