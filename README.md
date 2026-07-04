@@ -163,8 +163,22 @@ The device connects to your home WiFi and fetches live data within ~10 seconds. 
 | **7-day %** | Weekly usage cap |
 | **7-day Opus %** | Weekly Opus model usage (Pro plan only) |
 | **Reset in: 2h15m** | Live countdown to next usage reset (NTP-synced) |
+| **Face icon** | Animated face in the top-right corner that reacts to your usage |
 
 All rows are individually toggleable in the web portal under **Display Settings**.
+
+### The Face
+
+![OLED with face](docs/oled_face.png)
+
+A small animated face lives in the top-right corner. It **winks every 7 seconds** (left eye, then right, then they reopen in the same order), and its **mouth follows your usage** — same metric as the primary %:
+
+| < 30% | 30–60% | 60–80% | > 80% |
+|:---:|:---:|:---:|:---:|
+| ![Smile](docs/face_smile.png) | ![Open](docs/face_open.png) | ![Flat](docs/face_flat.png) | ![Sad](docs/face_sad.png) |
+| Smile | Open | Flat | Sad |
+
+If the face looks sad, you're about to hit your cap.
 
 ---
 
@@ -179,6 +193,8 @@ Connect to the ESP32-Claude-Dashboard AP and open `http://192.168.4.1`.
 | **Connection Settings** | WiFi credentials, session cookie, refresh interval, AP password |
 | **Refresh Data** | Force an immediate fetch |
 | **Reset Defaults** | Wipe all settings back to factory defaults |
+
+> Bonus: `GET /api/screen` returns the raw 1024-byte SSD1306 framebuffer — the exact pixels currently on the OLED (the screenshots above were captured this way).
 
 ---
 

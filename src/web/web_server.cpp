@@ -1,6 +1,7 @@
 #include "web_server.h"
 #include "../storage/settings.h"
 #include "../models/usage_data.h"
+#include "../display/display.h"
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 #include <Arduino.h>
@@ -219,6 +220,19 @@ function drawPreview() {
 
   ctx.font = (7 * S) + 'px monospace';
   ctx.fillText('CLAUDE USAGE', 0, (y + 7) * S);
+
+  // Corner face icon, mirrors drawIconScaled(86, 0, 42, 24) on the OLED
+  const ICON = [0x1FFFFFF0,0x10000010,0x10000010,0x11F83F10,0x10000010,
+                0x10F01E10,0x10911210,0x10F11E10,0x10010010,0x10000010,
+                0x10000010,0x107FFC10,0x10800210,0x107FFC10,0x10000010,
+                0x10038010,0x10000010,0x1FFFFFF0];
+  for (let dy = 0; dy < 24; dy++) {
+    const sy = Math.floor(dy * 18 / 24);
+    for (let dx = 0; dx < 42; dx++) {
+      const sx = Math.floor(dx * 32 / 42);
+      if ((ICON[sy] >>> (31 - sx)) & 1) ctx.fillRect((86 + dx) * S, dy * S, S, S);
+    }
+  }
   y += 10;
 
   if (c.showUsagePct) {
@@ -244,7 +258,8 @@ function drawPreview() {
   ctx.font = (7 * S) + 'px monospace';
 
   if (c.show7dPct && sd.available) {
-    ctx.fillText('7d: ' + (sd.utilization || 0) + '%', 0, (y + 7) * S);
+    const cur = live.model ? ' - cur: ' + live.model : '';
+    ctx.fillText('7d: ' + (sd.utilization || 0) + '%' + cur, 0, (y + 7) * S);
     y += 9;
   }
 
@@ -309,6 +324,7 @@ static void handleGetStatus(AsyncWebServerRequest* req) {
     JsonDocument doc;
     doc["valid"]     = g_data->valid;
     doc["timestamp"] = g_data->timestamp;
+    doc["model"]     = g_data->model;
 
     auto addBlock = [&](const char* key, const UsageBlock& b) {
         JsonObject o = doc[key].to<JsonObject>();
@@ -409,6 +425,13 @@ void webServerStart(UsageData& usageData) {
 
     g_server.on("/api/refresh", HTTP_POST,
         [](AsyncWebServerRequest* req) { handleRefresh(req); });
+
+    // Raw SSD1306 framebuffer (1024 bytes, page-major) for screenshots
+    g_server.on("/api/screen", HTTP_GET, [](AsyncWebServerRequest* req) {
+        const uint8_t* fb = displayGetBuffer();
+        if (!fb) { req->send(503); return; }   // OLED init failed → no buffer
+        req->send(req->beginResponse(200, "application/octet-stream", fb, 1024));
+    });
 
     g_server.onNotFound([](AsyncWebServerRequest* req) { req->send(404); });
     g_server.begin();

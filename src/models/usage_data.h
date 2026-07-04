@@ -11,6 +11,7 @@ struct UsageBlock {
 struct UsageData {
     bool       valid;
     char       timestamp[20];  // device uptime when last fetched, e.g. "T+00:05:23"
+    char       model[24];      // current model display name, e.g. "Fable"
     UsageBlock fiveHour;
     UsageBlock sevenDay;
     UsageBlock sevenDayOpus;
