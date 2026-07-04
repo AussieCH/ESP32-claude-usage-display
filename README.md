@@ -107,7 +107,10 @@ single upstream poll feeds both — no extra load on Anthropic's endpoint.
 
 ## Using a Different Board
 
-The project compiles for any ESP32-family board. Only two files need to change.
+The firmware compiles for any ESP32-family board, but on the T-Display S3 the
+display is the board's on-board parallel ST7789 driven through TFT_eSPI build
+flags. Porting to another board means reconfiguring (or replacing) the display,
+not just swapping the MCU — so expect to touch `platformio.ini` in two places.
 
 ### 1. `platformio.ini` — change the board
 
@@ -124,23 +127,18 @@ Replace the `board` line and adjust `build_flags` to match your module:
 - `-DBOARD_HAS_PSRAM` — only needed if your module physically has PSRAM (look for the **R** in the part number, e.g. N16**R**8)
 - `-DARDUINO_USB_CDC_ON_BOOT=1` — only needed for boards using the native USB-CDC port for Serial (ESP32-S3 and S2 dev boards)
 
-### 2. `src/config/config.h` — change the I2C pins
+### 2. `platformio.ini` — reconfigure the display
 
-```cpp
-#define PIN_SDA  8   // ← change to match your wiring
-#define PIN_SCL  9   // ← change to match your wiring
-```
+The ST7789 pin mapping lives in the `-DTFT_*` build flags (the 8-bit parallel
+bus D0–D7, plus WR, RD, DC, CS, RST and BL). A different board or panel needs
+these changed to match its wiring and driver — see the
+[TFT_eSPI](https://github.com/Bodmer/TFT_eSPI) documentation for the driver
+defines. `src/config/config.h` only holds board-level pins (LCD power rail,
+backlight, the two buttons) — there are **no I2C display pins** to change.
 
-Common I2C defaults by board family:
-
-| Board family | Default SDA | Default SCL |
-|---|---|---|
-| ESP32 classic | GPIO 21 | GPIO 22 |
-| ESP32-S3 / S2 | GPIO 8 | GPIO 9 |
-| ESP32-C3 | GPIO 8 | GPIO 9 |
-| ESP32-C6 | GPIO 6 | GPIO 7 |
-
-> Any free GPIO works for I2C. The table above lists common defaults, but you can wire SDA/SCL to any available pin — just update `config.h` to match your physical wiring.
+> Going back to an I2C SSD1306 OLED (as in the original project) is also
+> possible, but means restoring an SSD1306 driver and rewriting `display.cpp`
+> for a 1-bit framebuffer — not just a pin change.
 
 ### Can I use an ESP8266?
 
@@ -268,7 +266,8 @@ All rows are individually toggleable in the web portal under **Display Settings*
 
 ### The Face
 
-![OLED with face](docs/oled_face.png)
+![Animated face](docs/oled_face.png)
+*Face concept, shown on the original OLED build — the same face renders in colour on the T-Display.*
 
 A small animated face lives in the top-right corner. It **winks every 7 seconds** (left eye, then right, then they reopen in the same order), and its **mouth follows your usage** — same metric as the primary %:
 
@@ -287,13 +286,13 @@ Connect to the ESP32-Claude-Dashboard AP and open `http://192.168.4.1`.
 
 | Section | Description |
 |---|---|
-| **Live Preview** | Canvas rendering of the current OLED layout, updates every 30 s |
+| **Live Preview** | Canvas rendering of the current LCD layout, updates every 30 s |
 | **Display Settings** | Toggle each row on/off |
 | **Connection Settings** | WiFi credentials, usage proxy URL + token, session cookie (legacy), refresh interval, AP password |
 | **Refresh Data** | Force an immediate fetch |
 | **Reset Defaults** | Wipe all settings back to factory defaults |
 
-> Bonus: `GET /api/screen` returns the raw 1024-byte SSD1306 framebuffer — the exact pixels currently on the OLED (the screenshots above were captured this way).
+> `GET /api/status` returns the current usage as JSON (the same data the display and Live Preview render).
 
 ---
 
@@ -313,8 +312,10 @@ Connect to the ESP32-Claude-Dashboard AP and open `http://192.168.4.1`.
 ## Troubleshooting
 
 **Display shows nothing**
-- Check wiring: SDA → GPIO 8, SCL → GPIO 9, VCC → 3.3V (not 5V)
-- Verify the I2C address is `0x3C`; some modules use `0x3D` — edit `config.h` if needed
+- The LCD is on-board — no wiring. Make sure the board is powered via USB-C
+- On battery, the LCD power rail needs `PIN_LCD_POWER` (GPIO 15) HIGH — this is
+  set at boot in firmware; a very old TFT_eSPI/board definition can miss it
+- If the backlight is off, cycle brightness with the **KEY** button (GPIO 14)
 
 **Build fails with `cc1plus.exe: CreateProcess: No such file or directory`**
 - The toolchain download was corrupted. Run in PowerShell:
@@ -394,9 +395,9 @@ MIT
 
 ## Screenshots
 
-### OLED Display
-![Claude Oled](docs/minioled.jpg)
-
+### Device display
+![Claude usage on device](docs/minioled.jpg)
+*From the original OLED build — a T-Display S3 photo will replace this.*
 
 ### Web Portal
 ![Claude Dashboard](docs/claude-dashboard.PNG)
