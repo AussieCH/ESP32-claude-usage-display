@@ -78,12 +78,15 @@ void loop() {
         g_ntpStarted = true;
     }
 
+    bool forced      = g_forceRefresh;   // button press → cache-bypassing refresh
     bool timeToFetch = g_firstFetch || (now - g_lastFetch >= s.refreshMs);
 
-    if (timeToFetch || g_forceRefresh) {
+    if (timeToFetch || forced) {
         g_forceRefresh = false;
         g_firstFetch   = false;
         g_lastFetch    = now;
+
+        if (forced) displayShowStatus("Refreshing...");
 
         if (!wifiHasAnySsid(s)) {
             displayShowError("Set WiFi SSID");
@@ -91,7 +94,7 @@ void loop() {
             displayShowError("WiFi connecting");
         } else if (s.proxyUrl[0]) {
             // Proxy mode: local/Tailscale usage proxy, no cookie needed
-            if (apiFetchProxy(g_usageData, s.proxyUrl, s.proxyToken)) {
+            if (apiFetchProxy(g_usageData, s.proxyUrl, s.proxyToken, forced)) {
                 displayRender(g_usageData, s);
                 Serial.printf("[Main] (proxy) 5h:%d%% 7d:%d%%\n",
                     g_usageData.fiveHour.utilization,

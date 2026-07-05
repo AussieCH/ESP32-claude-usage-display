@@ -118,7 +118,7 @@ map:
     read_only: false
 options:
   auth_token: ""
-  cache_seconds: 180
+  cache_seconds: 600
 schema:
   auth_token: str?
   cache_seconds: int
@@ -136,7 +136,7 @@ cat > run.sh <<'EOF'
 #!/bin/sh
 C=/data/options.json
 export AUTH_TOKEN="$(python3 -c "import json;print(json.load(open('$C')).get('auth_token',''))")"
-export CACHE_SECONDS="$(python3 -c "import json;print(json.load(open('$C')).get('cache_seconds',180))")"
+export CACHE_SECONDS="$(python3 -c "import json;print(json.load(open('$C')).get('cache_seconds',600))")"
 export CREDENTIALS_FILE="/share/claude/.credentials.json"
 exec python3 /claude_usage_proxy.py
 EOF
