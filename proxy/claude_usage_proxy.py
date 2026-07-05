@@ -157,12 +157,12 @@ def _iso_from_any(value) -> str:
 
 
 def _pct_from_any(value) -> int:
+    # The OAuth usage endpoint returns utilization as a percentage on a 0-100
+    # scale (e.g. 6.0 = 6%), so 1.0 means 1%. Do NOT treat 0 < v <= 1 as a
+    # fraction to scale by 100 — that turned a real 1% into 100%.
     if value is None:
         return 0
-    f = float(value)
-    if 0.0 < f <= 1.0:         # fraction → percent
-        f *= 100.0
-    return max(0, min(100, round(f)))
+    return max(0, min(100, round(float(value))))
 
 
 def _pick(d: dict, *keys):
