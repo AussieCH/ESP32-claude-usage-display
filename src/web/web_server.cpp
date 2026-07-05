@@ -9,7 +9,7 @@
 static AsyncWebServer g_server(80);
 static UsageData*     g_data = nullptr;
 
-static char   s_postBuf[1500];   // headroom for proxyUrl+proxyToken added in v3
+static char   s_postBuf[2200];   // headroom for proxyUrl+proxyToken + 4 WiFi slots
 static size_t s_postBufLen = 0;
 
 static const char HTML_PAGE[] PROGMEM = R"rawhtml(<!DOCTYPE html>
@@ -69,14 +69,10 @@ canvas{border:2px solid #44403c;border-radius:6px;display:block;margin:0 auto;im
   <h2>Connection Settings</h2>
 
   <div class="field">
-    <span>Home WiFi SSID</span>
-    <input type="text" id="wifiSsid" placeholder="Your home network name">
-    <div class="hint">Device must connect here to reach claude.ai</div>
+    <span>WiFi Networks (up to 4)</span>
+    <div class="hint">The device connects to whichever configured network is in range — add home, office, etc. It auto-switches when you move.</div>
   </div>
-  <div class="field">
-    <span>Home WiFi Password</span>
-    <input type="password" id="wifiPassword" placeholder="Leave blank to keep current">
-  </div>
+  <div id="wifiList"></div>
 
   <div class="field">
     <span>Usage Proxy URL (recommended)</span>
@@ -138,11 +134,20 @@ async function loadSettings() {
     document.getElementById('show7dPct').checked      = !!cfg.show7dPct;
     document.getElementById('show7dOpus').checked     = !!cfg.show7dOpus;
     document.getElementById('showResetTime').checked  = !!cfg.showResetTime;
-    document.getElementById('wifiSsid').value    = cfg.wifiSsid   || '';
+    const wifi = cfg.wifi || [];
+    const list = document.getElementById('wifiList');
+    list.innerHTML = '';
+    for (let i = 0; i < 4; i++) {
+      list.insertAdjacentHTML('beforeend',
+        '<div class="field"><span>WiFi ' + (i+1) + '</span>' +
+        '<input type="text" id="wifiSsid' + i + '" placeholder="Network name (blank = unused)">' +
+        '<input type="password" id="wifiPass' + i + '" placeholder="Password (blank = keep current)" style="margin-top:6px">' +
+        '</div>');
+      document.getElementById('wifiSsid' + i).value = (wifi[i] && wifi[i].ssid) || '';
+    }
     document.getElementById('proxyUrl').value    = cfg.proxyUrl   || '';
     document.getElementById('proxyToken').value  = '';
     document.getElementById('refreshMs').value   = cfg.refreshMs  || 30000;
-    document.getElementById('wifiPassword').value = '';
     document.getElementById('apPassword').value  = '';
     document.getElementById('sessionKey').value  = '';
     document.getElementById('orgIdDisplay').value = cfg.orgId || '(not yet discovered)';
@@ -170,16 +175,20 @@ async function saveSettings() {
     show7dPct:       document.getElementById('show7dPct').checked,
     show7dOpus:      document.getElementById('show7dOpus').checked,
     showResetTime:   document.getElementById('showResetTime').checked,
-    wifiSsid:        document.getElementById('wifiSsid').value.trim(),
     proxyUrl:        document.getElementById('proxyUrl').value.trim(),
     refreshMs:       parseInt(document.getElementById('refreshMs').value) || 30000,
   };
+  body.wifi = [];
+  for (let i = 0; i < 4; i++) {
+    const slot = { ssid: document.getElementById('wifiSsid' + i).value.trim() };
+    const pw = document.getElementById('wifiPass' + i).value;
+    if (pw) slot.password = pw;
+    body.wifi.push(slot);
+  }
   const sk = document.getElementById('sessionKey').value.trim();
-  const wp = document.getElementById('wifiPassword').value;
   const ap = document.getElementById('apPassword').value;
   const pt = document.getElementById('proxyToken').value.trim();
   if (sk) body.sessionKey   = sk;
-  if (wp) body.wifiPassword = wp;
   if (ap) body.apPassword   = ap;
   if (pt) body.proxyToken   = pt;
 
@@ -331,8 +340,11 @@ static void handleGetSettings(AsyncWebServerRequest* req) {
     doc["orgId"]           = s.orgId;
     doc["proxyUrl"]        = s.proxyUrl;
     doc["proxyToken"]      = "";            // never echoed
-    doc["wifiSsid"]        = s.wifiSsid;
-    doc["wifiPassword"]    = "";            // never echoed
+    JsonArray wifi = doc["wifi"].to<JsonArray>();
+    for (int i = 0; i < WIFI_SLOTS; i++) {
+        JsonObject o = wifi.add<JsonObject>();
+        o["ssid"] = wifiSsidAt(s, i);       // passwords never echoed
+    }
     doc["apPassword"]      = "";            // never echoed
     doc["refreshMs"]       = s.refreshMs;
     doc["showUsagePct"]    = s.showUsagePct;
@@ -393,12 +405,17 @@ static void applySettingsJson(const char* buf, size_t len, AsyncWebServerRequest
         if (pt && strlen(pt) > 0)
             snprintf(s.proxyToken, sizeof(s.proxyToken), "%s", pt);
     }
-    if (!doc["wifiSsid"].isNull())
-        snprintf(s.wifiSsid, sizeof(s.wifiSsid), "%s", doc["wifiSsid"].as<const char*>());
-    if (!doc["wifiPassword"].isNull()) {
-        const char* pw = doc["wifiPassword"].as<const char*>();
-        if (pw && strlen(pw) > 0)
-            snprintf(s.wifiPassword, sizeof(s.wifiPassword), "%s", pw);
+    if (doc["wifi"].is<JsonArray>()) {
+        JsonArray wifi = doc["wifi"].as<JsonArray>();
+        for (int i = 0; i < WIFI_SLOTS && i < (int)wifi.size(); i++) {
+            JsonObject o = wifi[i].as<JsonObject>();
+            if (o.isNull()) continue;
+            if (!o["ssid"].isNull())                    // SSID set even if empty (clears slot)
+                wifiSetSsidAt(s, i, o["ssid"].as<const char*>());
+            const char* pw = o["password"].as<const char*>();
+            if (pw && strlen(pw) > 0)                   // password only if provided
+                wifiSetPassAt(s, i, pw);
+        }
     }
     if (!doc["apPassword"].isNull()) {
         const char* pw = doc["apPassword"].as<const char*>();

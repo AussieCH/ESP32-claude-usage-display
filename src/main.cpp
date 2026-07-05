@@ -35,10 +35,10 @@ void setup() {
     wifiStart();
 
     const Settings& sc = settingsGet();
-    if (sc.wifiSsid[0]) {
+    if (wifiHasAnySsid(sc)) {
         displayShowStatus("WiFi connecting");
         uint32_t t0 = millis();
-        while (!wifiIsConnected() && millis() - t0 < 8000) delay(200);
+        while (!wifiIsConnected() && millis() - t0 < 12000) { wifiMaintain(); delay(200); }
 
         if (wifiIsConnected()) {
             Serial.printf("[WiFi] STA IP: %s\n", WiFi.localIP().toString().c_str());
@@ -67,6 +67,9 @@ void loop() {
     Settings& s = settingsGet();
     uint32_t  now = millis();
 
+    // Keep STA connected to the strongest configured network (auto-switch on move)
+    wifiMaintain();
+
     // Start NTP if WiFi connected after setup
     if (!g_ntpStarted && wifiIsConnected()) {
         configTime(0, 0, "pool.ntp.org", "time.nist.gov");
@@ -82,7 +85,7 @@ void loop() {
         g_firstFetch   = false;
         g_lastFetch    = now;
 
-        if (!s.wifiSsid[0]) {
+        if (!wifiHasAnySsid(s)) {
             displayShowError("Set WiFi SSID");
         } else if (!wifiIsConnected()) {
             displayShowError("WiFi connecting");

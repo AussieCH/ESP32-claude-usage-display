@@ -17,9 +17,22 @@ struct Settings {
     bool     show7dOpus;      // show 7-day Opus utilization row
     bool     showResetTime;   // show next reset time
     uint8_t  schemaVersion;
+    // Appended below to preserve the NVS blob layout of earlier configs (no
+    // PREFS_VER bump): WiFi slots 2-4. Slot 1 is wifiSsid/wifiPassword above.
+    char     wifiSsidN[3][64];
+    char     wifiPasswordN[3][64];
 };
+
+#define WIFI_SLOTS 4   // slot 0 = wifiSsid/wifiPassword, slots 1-3 = wifiSsidN[]
 
 void      settingsInit();
 Settings& settingsGet();
 void      settingsSave(const Settings& s);
 void      settingsReset();
+
+// WiFi slot accessors (i in 0..WIFI_SLOTS-1)
+const char* wifiSsidAt(const Settings& s, int i);
+const char* wifiPassAt(const Settings& s, int i);
+void        wifiSetSsidAt(Settings& s, int i, const char* ssid);
+void        wifiSetPassAt(Settings& s, int i, const char* pass);
+bool        wifiHasAnySsid(const Settings& s);
