@@ -12,54 +12,48 @@ host; clients only ever see utilization percentages and reset timestamps.
 
 ## Credentials
 
-The proxy needs a Claude OAuth token. Pick one of two ways:
+The proxy needs the **subscription OAuth token** (access + refresh) — the same one
+Claude Code's `/usage` command uses.
 
-### Option 1 — Static token (simplest; the only practical way on macOS)
+> **`claude setup-token` does not work for this.** That long-lived static token
+> (`sk-ant-oat01-…`, set via `STATIC_ACCESS_TOKEN`) is scoped to inference, and the
+> usage endpoint rejects it with **HTTP 403**. It's supported by the proxy for
+> completeness, but for `/usage` you need the subscription token below.
 
-On a machine that has Claude Code, run:
+### Recommended — `credentials.json` (auto-refreshing)
+
+On a machine that has Claude Code, sign in with your subscription:
 
 ```bash
-claude setup-token
+claude auth login --claudeai
+claude auth status          # expect "loggedIn": true
 ```
 
-This opens a browser, you authorize, and it prints a long-lived token
-(`sk-ant-oat01-…`). Set it as `STATIC_ACCESS_TOKEN` — no file and no refresh
-needed. This is the recommended path when the proxy runs somewhere without its own
-Claude login (e.g. a Home Assistant add-on).
+Then get a `.credentials.json` (`{"claudeAiOauth":{"accessToken":…,"refreshToken":…}}`):
 
-> If the usage endpoint rejects this token (HTTP 401 — it is documented as scoped
-> to inference), use Option 2 instead.
+- **Linux:** it's already a file at `~/.claude/.credentials.json`.
+- **macOS:** the token lives in the **Keychain**, not a file (`claude /login` won't
+  create one). Export it:
+  ```bash
+  security find-generic-password -s "Claude Code-credentials" -w > credentials.json
+  ```
+  (Click **Allow** on the Keychain prompt.)
 
-### Option 2 — `credentials.json` (auto-refreshing)
-
-The proxy can read a Claude Code credentials file and refresh the access token
-itself. **This file only exists on Linux** — Claude Code writes
-`~/.claude/.credentials.json` there because Linux has no system keychain.
-
-> **macOS note:** on macOS Claude Code stores its tokens in the **Keychain**, not
-> in a file, so `~/.claude/.credentials.json` does **not** exist and `claude /login`
-> will not create it. On macOS, use Option 1, or generate the file on the Linux
-> host that will run the proxy by installing Claude Code there and logging in.
-
-Point `CREDENTIALS_FILE` at the file. The proxy needs **write access** to it so it
-can persist rotated tokens.
+Point `CREDENTIALS_FILE` at the file. The proxy refreshes the access token itself,
+so it needs **write access** to persist rotated tokens.
 
 ## Run
 
-**Docker (with a static token):**
+**Docker (credentials file):**
 ```bash
-# set STATIC_ACCESS_TOKEN and AUTH_TOKEN in docker-compose.yml
-docker compose up -d
-curl -H "Authorization: Bearer <AUTH_TOKEN>" http://localhost:8787/usage
-```
-
-**Docker (with a credentials file):**
-```bash
-mkdir data && cp ~/.claude/.credentials.json data/   # Linux only, see above
+mkdir data && cp /path/to/credentials.json data/.credentials.json
 # set AUTH_TOKEN in docker-compose.yml (e.g. `openssl rand -hex 32`)
 docker compose up -d
 curl -H "Authorization: Bearer <AUTH_TOKEN>" http://localhost:8787/usage
 ```
+
+**Home Assistant OS:** run the proxy as a local add-on — see the full walkthrough in
+[`../docs/home-assistant.md`](../docs/home-assistant.md).
 
 **Without Docker:** see the comment header in `claude-usage-proxy.service`.
 
@@ -67,10 +61,10 @@ curl -H "Authorization: Bearer <AUTH_TOKEN>" http://localhost:8787/usage
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `STATIC_ACCESS_TOKEN` | *(empty)* | Use this token as-is; skips the file + refresh (Option 1) |
-| `CREDENTIALS_FILE` | `~/.claude/.credentials.json` | Claude Code credentials JSON (Option 2) |
+| `CREDENTIALS_FILE` | `~/.claude/.credentials.json` | Subscription credentials JSON (recommended) |
 | `AUTH_TOKEN` | *(empty)* | Required Bearer token for `/usage`; if empty, only private/loopback clients are served |
 | `CACHE_SECONDS` | `180` | Minimum seconds between upstream calls — do not lower |
+| `STATIC_ACCESS_TOKEN` | *(empty)* | Static token as-is (skips file + refresh); **403s on the usage endpoint — see Credentials** |
 | `PORT` / `BIND` | `8787` / `0.0.0.0` | Listen port / address |
 
 ## Response format (`GET /usage`)
