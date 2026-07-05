@@ -44,6 +44,7 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import ip_address
 from pathlib import Path
@@ -60,6 +61,10 @@ CACHE_SECONDS    = max(60, int(os.environ.get("CACHE_SECONDS", "600")))
 # Floor for /usage?force=1 — the smallest gap between real upstream fetches even
 # when a client forces a refresh, so a mashed refresh button can't hit the limit.
 FORCE_MIN_SECONDS = max(10, int(os.environ.get("FORCE_MIN_SECONDS", "30")))
+# On HTTP 429, don't touch upstream again for this long (unless the response's
+# Retry-After header asks for more) — keeps a rate-limit cooldown from snowballing.
+BACKOFF_429      = max(60, int(os.environ.get("BACKOFF_429", "1800")))
+BACKOFF_MAX      = 6 * 3600  # never back off longer than this, even if told to
 USER_AGENT       = os.environ.get("USER_AGENT", "claude-code/2.1.0")
 CLIENT_ID        = os.environ.get(
     "OAUTH_CLIENT_ID", "9d1c250a-e61b-44d9-88ed-5944d1962f5e")
@@ -204,12 +209,41 @@ def normalize(raw: dict) -> dict:
 # ── Cache ────────────────────────────────────────────────────────────
 
 _cache_lock = threading.Lock()
-_cache: dict = {"body": None, "raw": None, "ts": 0.0, "stale": False}
+_cache: dict = {"body": None, "raw": None, "ts": 0.0, "stale": False, "retry_after": 0.0}
+
+
+def _stale() -> dict:
+    """A copy of the cached body flagged as stale."""
+    body = dict(_cache["body"])
+    body["stale"] = True
+    return body
+
+
+def _retry_after_seconds(e: "urllib.error.HTTPError") -> float:
+    """Seconds to wait per the response's Retry-After header, else BACKOFF_429.
+    Accepts an integer (seconds) or an HTTP-date; clamped to BACKOFF_MAX."""
+    ra = e.headers.get("Retry-After") if e.headers else None
+    if ra:
+        ra = ra.strip()
+        if ra.isdigit():
+            return min(float(ra), BACKOFF_MAX)
+        try:
+            when = parsedate_to_datetime(ra)
+            return max(0.0, min((when - datetime.now(timezone.utc)).total_seconds(), BACKOFF_MAX))
+        except (TypeError, ValueError):
+            pass
+    return float(BACKOFF_429)
 
 
 def get_usage(force: bool = False) -> dict:
     with _cache_lock:
         now = time.time()
+
+        # In a rate-limit cooldown: serve stale, don't touch upstream (even on
+        # force) until the backoff expires.
+        if _cache["body"] and now < _cache["retry_after"]:
+            return _stale()
+
         # Serve cache unless it's older than the window — or, for a forced
         # refresh, older than the (much smaller) force floor.
         if _cache["body"]:
@@ -229,21 +263,22 @@ def get_usage(force: bool = False) -> dict:
                 else:
                     raise
             body = normalize(raw)
-            _cache.update(body=body, raw=raw, ts=now, stale=False)
+            _cache.update(body=body, raw=raw, ts=now, stale=False, retry_after=0.0)
             log(f"[upstream] ok — 5h {body['fiveHour']['utilization']}% / "
                 f"7d {body['sevenDay']['utilization']}%")
             return body
 
         except urllib.error.HTTPError as e:
-            log(f"[upstream] HTTP {e.code}: {e.reason}")
+            _cache["ts"] = now
+            _cache["stale"] = True
+            if e.code == 429:
+                wait = _retry_after_seconds(e)
+                _cache["retry_after"] = now + wait
+                log(f"[upstream] HTTP 429 — backing off {int(wait)}s (no upstream until then)")
+            else:
+                log(f"[upstream] HTTP {e.code}: {e.reason}")
             if _cache["body"]:
-                # Serve stale data rather than an error; push next attempt
-                # out a full cache window so a 429 can't snowball.
-                _cache["ts"] = now
-                _cache["stale"] = True
-                stale = dict(_cache["body"])
-                stale["stale"] = True
-                return stale
+                return _stale()
             raise
         except Exception as e:                      # noqa: BLE001
             log(f"[upstream] error: {e}")
@@ -253,9 +288,7 @@ def get_usage(force: bool = False) -> dict:
                 # down) can't make every client request hit upstream.
                 _cache["ts"] = now
                 _cache["stale"] = True
-                stale = dict(_cache["body"])
-                stale["stale"] = True
-                return stale
+                return _stale()
             raise
 
 # ── HTTP server ──────────────────────────────────────────────────────

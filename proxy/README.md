@@ -65,6 +65,7 @@ curl -H "Authorization: Bearer <AUTH_TOKEN>" http://localhost:8787/usage
 | `AUTH_TOKEN` | *(empty)* | Required Bearer token for `/usage`; if empty, only private/loopback clients are served |
 | `CACHE_SECONDS` | `600` | Seconds a normal poll may serve cached data (10 min keeps well clear of the rate limit) |
 | `FORCE_MIN_SECONDS` | `30` | Floor for `GET /usage?force=1` — smallest gap between real upstream fetches even when forced |
+| `BACKOFF_429` | `1800` | On HTTP 429, seconds to leave upstream alone (unless `Retry-After` asks for longer) so a rate-limit cooldown can't snowball |
 | `STATIC_ACCESS_TOKEN` | *(empty)* | Static token as-is (skips file + refresh); **403s on the usage endpoint — see Credentials** |
 | `PORT` / `BIND` | `8787` / `0.0.0.0` | Listen port / address |
 
@@ -89,8 +90,10 @@ and still get the latest numbers on demand.
 }
 ```
 
-On upstream errors (e.g. a 429) the proxy serves the last known result with
-`"stale": true` instead of passing the error through.
+On upstream errors the proxy serves the last known result with `"stale": true`
+instead of passing the error through. On **HTTP 429** it also stops touching
+upstream (even on `?force=1`) until the `Retry-After` / `BACKOFF_429` window
+passes, so a rate-limit cooldown can't snowball into repeated hits.
 
 ## Reachable remotely via Tailscale Funnel
 
