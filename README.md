@@ -36,10 +36,10 @@ the following compared to the OLED original:
 | Display | 128×64 monochrome, I²C (`SSD1306` lib) | 320×170 colour, 8-bit parallel `ST7789` via **TFT_eSPI** |
 | Wiring | 2 wires (SDA/SCL) | none — LCD is on-board, pins set through build flags |
 | Layout | tight 1-bit mono rows | roomy landscape layout, larger fonts, more rows visible at once |
-| Colours | black/white only | RGB565 palette in `config.h`; progress bar is **green < 60 % / amber 60–80 % / red > 80 %**, Claude-orange accents |
+| Primary metric | text % + bar | **ring gauge** with the % in the centre, coloured by band (0–30 green / 31–60 yellow / 61–80 orange / 81–100 red) |
 | Brightness | fixed | PWM-dimmable backlight (LEDC); **KEY** button cycles 100 → 60 → 25 → 5 % |
 | Power | — | GPIO 15 drives the LCD power rail HIGH at boot (needed on battery) |
-| Refresh button | — | **BOOT** button forces an immediate data fetch |
+| Refresh button | — | **BOOT** button forces an immediate, cache-bypassing refresh |
 | Face icon | 1-bit sprite | rendered in colour, same wink/mouth-follows-usage behaviour |
 
 Everything else (WiFi AP+STA portal, data fetching, settings, NTP countdown)
@@ -61,6 +61,10 @@ The firmware supports two ways of getting usage data:
    the portal.
 2. **Legacy mode:** claude.ai session cookie, as in the original project.
    Used automatically when the proxy URL is empty.
+
+> **Gentle polling + on-demand freshness:** the proxy caches upstream data (default
+> 10 min) so routine polling stays well clear of the rate limit. The **BOOT button**
+> triggers a cache-bypassing `?force=1` refresh when you want the latest numbers now.
 
 ## Status retrieval via a Home Assistant proxy
 
@@ -109,7 +113,7 @@ single upstream poll feeds both — no extra load on Anthropic's endpoint.
 
 | Button | GPIO | Function |
 | --- | --- | --- |
-| BOOT (left of USB) | 0 | Force an immediate data refresh |
+| BOOT (left of USB) | 0 | Force an immediate refresh — in proxy mode this **bypasses the proxy cache** (`?force=1`) for the freshest numbers, with a brief "Refreshing…" on screen |
 | KEY (right of USB) | 14 | Cycle backlight brightness (100 → 60 → 25 → 5 %) |
 
 ## Using a Different Board
@@ -195,9 +199,10 @@ After flashing, the device starts a WiFi access point named **ESP32-Claude-Dashb
 
 1. Connect to WiFi **ESP32-Claude-Dashboard** (password: `dashboard1`)
 2. Open a browser and go to `http://192.168.4.1`
-3. Under **Connection Settings**, fill in:
-   - **Home WiFi SSID** — your home router network name
-   - **Home WiFi Password** — your home router password
+3. Under **Connection Settings → WiFi Networks**, fill in at least one of the
+   **four** slots (SSID + password). The device connects to whichever configured
+   network is in range and **switches automatically** when you move — so you can
+   add home, office, etc. and carry the device between them.
 
 Now pick **one** data source in Step 2 — proxy (recommended) or the legacy cookie.
 
@@ -262,14 +267,13 @@ fetches live data within ~10 seconds; the display then updates automatically.
 
 | Field | Description |
 |---|---|
-| **Primary %** | 5-hour session usage (or 7-day if no 5h limit on your plan) |
-| **Progress bar** | Visual fill for the primary metric |
-| **7-day %** | Weekly usage cap, with the current model next to it (`7d: 22% - cur: Fable`) |
-| **7-day Opus %** | Weekly Opus model usage (Pro plan only) |
-| **Reset in: 2h15m** | Live countdown to next usage reset (NTP-synced) |
+| **Ring gauge** | Blue circular gauge for the primary metric (5-hour session, or 7-day if no 5h limit on your plan), with the percentage in the centre — coloured by band: **0–30 green / 31–60 yellow / 61–80 orange / 81–100 red** |
+| **5h reset countdown** | `H:MM` until the next 5-hour reset, under the face icon (NTP-synced) |
+| **7 Days: N%** | Weekly usage cap |
+| **Reset DD.MM. HH:MM** | Absolute date/time of the next 7-day reset, in local time (DST-aware) |
 | **Face icon** | Animated face in the top-right corner that reacts to your usage |
 
-All rows are individually toggleable in the web portal under **Display Settings**.
+Rows are toggleable in the web portal under **Display Settings**.
 
 ### The Face
 
@@ -306,10 +310,10 @@ Connect to the ESP32-Claude-Dashboard AP and open `http://192.168.4.1`.
 |---|---|---|
 | Usage Proxy URL | *(empty)* | Proxy endpoint; when set, the device uses proxy mode instead of the cookie |
 | Proxy Bearer Token | *(empty)* | Optional `AUTH_TOKEN` for the proxy |
-| Refresh interval | 30 000 ms | How often the device polls its data source (proxy or claude.ai) |
+| Refresh interval | 30 000 ms | How often the device polls its data source (in proxy mode this reads the proxy cache; the BOOT button forces a fresh fetch) |
 | AP password | `dashboard1` | Password for the device WiFi AP |
 | Session cookie | *(empty)* | Legacy mode: full Cookie header from claude.ai DevTools |
-| Home WiFi SSID | *(empty)* | Your home router — required for internet access |
+| WiFi Networks (×4) | *(empty)* | Up to four SSID/password pairs — the device connects to the strongest in range and auto-switches when moved |
 
 ---
 
