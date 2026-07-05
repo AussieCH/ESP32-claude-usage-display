@@ -99,6 +99,8 @@ void loop() {
                 Serial.printf("[Main] (proxy) 5h:%d%% 7d:%d%%\n",
                     g_usageData.fiveHour.utilization,
                     g_usageData.sevenDay.utilization);
+            } else if (displayHasData()) {
+                displayShowStale();          // keep the last good numbers on screen
             } else {
                 displayShowError("Proxy Error");
             }
@@ -115,6 +117,8 @@ void loop() {
                 Serial.printf("[Main] 5h:%d%% 7d:%d%%\n",
                     g_usageData.fiveHour.utilization,
                     g_usageData.sevenDay.utilization);
+            } else if (displayHasData()) {
+                displayShowStale();          // keep the last good numbers on screen
             } else {
                 displayShowError("API Error");
             }

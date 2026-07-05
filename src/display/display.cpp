@@ -18,6 +18,8 @@ static bool g_ready = false;
 static UsageData g_lastData;
 static Settings  g_lastSettings;
 static bool      g_hasData = false;
+static bool      g_everRendered = false;   // real data shown at least once
+static bool      g_stale = false;          // showing last-good data during an error
 static uint8_t   g_animState = 0;
 
 // Backlight PWM (Arduino core 2.x LEDC API)
@@ -226,6 +228,21 @@ void displayRender(const UsageData& data, const Settings& s) {
     g_lastData     = data;
     g_lastSettings = s;
     g_hasData      = true;
+    g_everRendered = true;
+    g_stale        = false;
+    renderFrame();
+}
+
+bool displayHasData() {
+    return g_everRendered;
+}
+
+// Keep the last good frame on screen during a transient fetch error, with a
+// small "stale" marker, instead of blanking to an error screen.
+void displayShowStale() {
+    if (!g_ready || !g_everRendered) return;
+    g_hasData = true;   // let the wink animation keep ticking
+    g_stale   = true;
     renderFrame();
 }
 
@@ -307,6 +324,13 @@ static void renderFrame() {
             g_spr.setTextColor(COL_MUTED, COL_BG);
             g_spr.drawString(line, 160, 134, 2);
         }
+    }
+
+    // "stale" marker when we're holding the last good frame during an error
+    if (g_stale) {
+        g_spr.setTextDatum(TL_DATUM);
+        g_spr.setTextColor(COL_AMBER, COL_BG);
+        g_spr.drawString("stale", 172, 14, 2);
     }
 
     g_spr.setTextDatum(TL_DATUM);
