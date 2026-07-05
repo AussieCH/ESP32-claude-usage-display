@@ -43,3 +43,37 @@ void settingsReset() {
     applyDefaults(g_settings);
     settingsSave(g_settings);
 }
+
+// ── WiFi slots ───────────────────────────────────────────────────────
+// Slot 0 maps to the original wifiSsid/wifiPassword fields; slots 1-3 to
+// the appended wifiSsidN[]/wifiPasswordN[] arrays.
+
+const char* wifiSsidAt(const Settings& s, int i) {
+    if (i <= 0) return s.wifiSsid;
+    if (i < WIFI_SLOTS) return s.wifiSsidN[i - 1];
+    return "";
+}
+
+const char* wifiPassAt(const Settings& s, int i) {
+    if (i <= 0) return s.wifiPassword;
+    if (i < WIFI_SLOTS) return s.wifiPasswordN[i - 1];
+    return "";
+}
+
+void wifiSetSsidAt(Settings& s, int i, const char* ssid) {
+    char* dst = (i <= 0) ? s.wifiSsid
+              : (i < WIFI_SLOTS ? s.wifiSsidN[i - 1] : nullptr);
+    if (dst) snprintf(dst, 64, "%s", ssid ? ssid : "");
+}
+
+void wifiSetPassAt(Settings& s, int i, const char* pass) {
+    char* dst = (i <= 0) ? s.wifiPassword
+              : (i < WIFI_SLOTS ? s.wifiPasswordN[i - 1] : nullptr);
+    if (dst) snprintf(dst, 64, "%s", pass ? pass : "");
+}
+
+bool wifiHasAnySsid(const Settings& s) {
+    for (int i = 0; i < WIFI_SLOTS; i++)
+        if (wifiSsidAt(s, i)[0]) return true;
+    return false;
+}
