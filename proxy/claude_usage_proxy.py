@@ -49,6 +49,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import ip_address
 from pathlib import Path
 
+PROXY_VERSION = "1.0.3"   # shown at startup, in /health, and the Server header
+
 # ── Configuration ────────────────────────────────────────────────────
 
 PORT             = int(os.environ.get("PORT", "8787"))
@@ -309,7 +311,7 @@ def _is_loopback(addr: str) -> bool:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "claude-usage-proxy/1.0"
+    server_version = f"claude-usage-proxy/{PROXY_VERSION}"
 
     def _send(self, code: int, payload: dict) -> None:
         body = json.dumps(payload).encode()
@@ -348,7 +350,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:                       # noqa: N802
         if self.path.split("?")[0] == "/health":
-            self._send(200, {"ok": True, "cacheAge": round(time.time() - _cache["ts"])})
+            self._send(200, {"ok": True, "version": PROXY_VERSION,
+                             "cacheAge": round(time.time() - _cache["ts"])})
             return
         if self.path.split("?")[0] != "/usage":
             self._send(404, {"error": "not found"})
@@ -376,7 +379,8 @@ def main() -> int:
             "clients (Funnel-forwarded public requests are rejected via "
             "X-Forwarded-For). Set AUTH_TOKEN anyway before exposing via "
             "Tailscale Funnel — it is the only real access control.")
-    log(f"[start] listening on {BIND}:{PORT}, cache {CACHE_SECONDS}s, "
+    log(f"[start] claude-usage-proxy v{PROXY_VERSION} — listening on {BIND}:{PORT}, "
+        f"cache {CACHE_SECONDS}s, "
         f"credentials: {'static token' if STATIC_TOKEN else CREDENTIALS_FILE}")
     ThreadingHTTPServer((BIND, PORT), Handler).serve_forever()
     return 0
