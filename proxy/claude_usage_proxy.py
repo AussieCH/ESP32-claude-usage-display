@@ -49,7 +49,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import ip_address
 from pathlib import Path
 
-PROXY_VERSION = "1.0.3"   # shown at startup, in /health, and the Server header
+PROXY_VERSION = "1.0.4"   # shown at startup, in /health, and the Server header
 
 # ── Configuration ────────────────────────────────────────────────────
 
@@ -241,10 +241,15 @@ def get_usage(force: bool = False) -> dict:
     with _cache_lock:
         now = time.time()
 
-        # In a rate-limit cooldown: serve stale, don't touch upstream (even on
-        # force) until the backoff expires.
-        if _cache["body"] and now < _cache["retry_after"]:
-            return _stale()
+        # In a rate-limit cooldown, never touch upstream (even on force) until the
+        # backoff expires — otherwise repeated polls keep hitting 429 and hold the
+        # cooldown open. Serve stale if we have any; if not (cold start during a
+        # rate limit), surface an error but STILL don't poll upstream.
+        if now < _cache["retry_after"]:
+            if _cache["body"]:
+                return _stale()
+            raise RuntimeError(
+                f"rate limited — retrying upstream in {int(_cache['retry_after'] - now)}s")
 
         # Serve cache unless it's older than the window — or, for a forced
         # refresh, older than the (much smaller) force floor.
