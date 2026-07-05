@@ -44,7 +44,7 @@ void setup() {
             Serial.printf("[WiFi] STA IP: %s\n", WiFi.localIP().toString().c_str());
             displayShowStatus("Syncing time...");
             configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-            setenv("TZ", "UTC0", 1);
+            setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);  // Europe/Zurich (DST auto)
             tzset();
             g_ntpStarted = true;
             // Wait up to 4 s for NTP sync
@@ -70,7 +70,7 @@ void loop() {
     // Start NTP if WiFi connected after setup
     if (!g_ntpStarted && wifiIsConnected()) {
         configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-        setenv("TZ", "UTC0", 1);
+        setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);  // Europe/Zurich (DST auto)
         tzset();
         g_ntpStarted = true;
     }

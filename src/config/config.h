@@ -19,9 +19,12 @@
 #define COL_TEXT    0xFFFF  // white
 #define COL_MUTED   0xAD13  // #a8a29e  stone grey
 #define COL_ORANGE  0xDBAA  // #d97757  Claude orange
-#define COL_GREEN   0x3693  // #34d399  bar < 60%
-#define COL_AMBER   0xFDE4  // #fbbf24  bar 60-80%
-#define COL_RED     0xFB8E  // #f87171  bar > 80%
+#define COL_GREEN   0x3693  // #34d399  gauge 0-30%
+#define COL_AMBER   0xFDE4  // #fbbf24  gauge 31-60% (yellow)
+#define COL_ORANGE2 0xFC87  // #fb923c  gauge 61-80% (orange)
+#define COL_RED     0xFB8E  // #f87171  gauge 81-100%
+#define COL_BLUE    0x5D9C  // #5ab0e6  ring gauge fill
+#define COL_TRACK   0x2187  // #26303a  ring background track
 
 #define AP_SSID_DEFAULT  "ESP32-Claude-Dashboard"
 #define AP_PASS_DEFAULT  "dashboard1"
