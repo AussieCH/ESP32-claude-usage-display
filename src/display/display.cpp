@@ -76,7 +76,7 @@ static void formatLocalDT(const char* iso, char* buf, size_t len) {
     if (!at || time(nullptr) < 1000000000L) { snprintf(buf, len, "--"); return; }
     struct tm lt;
     localtime_r(&at, &lt);
-    strftime(buf, len, "%d.%m %H:%M", &lt);
+    strftime(buf, len, "%d.%m. %H:%M", &lt);
 }
 
 // ── Corner icon (32x18 source bitmap, scaled up at draw time) ───────
