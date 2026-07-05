@@ -63,9 +63,18 @@ curl -H "Authorization: Bearer <AUTH_TOKEN>" http://localhost:8787/usage
 |---|---|---|
 | `CREDENTIALS_FILE` | `~/.claude/.credentials.json` | Subscription credentials JSON (recommended) |
 | `AUTH_TOKEN` | *(empty)* | Required Bearer token for `/usage`; if empty, only private/loopback clients are served |
-| `CACHE_SECONDS` | `180` | Minimum seconds between upstream calls — do not lower |
+| `CACHE_SECONDS` | `600` | Seconds a normal poll may serve cached data (10 min keeps well clear of the rate limit) |
+| `FORCE_MIN_SECONDS` | `30` | Floor for `GET /usage?force=1` — smallest gap between real upstream fetches even when forced |
 | `STATIC_ACCESS_TOKEN` | *(empty)* | Static token as-is (skips file + refresh); **403s on the usage endpoint — see Credentials** |
 | `PORT` / `BIND` | `8787` / `0.0.0.0` | Listen port / address |
+
+## Immediate refresh (`GET /usage?force=1`)
+
+A normal `GET /usage` serves the cache (up to `CACHE_SECONDS`). Adding `?force=1`
+bypasses the cache and fetches fresh from Anthropic **now** — for an on-demand
+refresh (e.g. a device button) — while still respecting `FORCE_MIN_SECONDS` so a
+mashed button can't hit the rate limit. This lets you run a gentle cache (10 min)
+and still get the latest numbers on demand.
 
 ## Response format (`GET /usage`)
 

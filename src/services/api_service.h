@@ -11,5 +11,6 @@ bool apiFetch(UsageData& out, const char* sessionKey, char* orgId, size_t orgIdL
 // url   : full proxy endpoint, e.g. http://192.168.1.10:8787/usage
 //         or https://<node>.<tailnet>.ts.net/usage
 // token : optional Bearer token (empty string = no auth header)
+// force : if true, request a cache-bypassing refresh (appends ?force=1)
 // HTTPS URLs are verified against the built-in ISRG Root X1 CA.
-bool apiFetchProxy(UsageData& out, const char* url, const char* token);
+bool apiFetchProxy(UsageData& out, const char* url, const char* token, bool force = false);

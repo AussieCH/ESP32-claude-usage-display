@@ -56,7 +56,10 @@ AUTH_TOKEN       = os.environ.get("AUTH_TOKEN", "").strip()
 CREDENTIALS_FILE = Path(os.environ.get(
     "CREDENTIALS_FILE", str(Path.home() / ".claude" / ".credentials.json")))
 STATIC_TOKEN     = os.environ.get("STATIC_ACCESS_TOKEN", "").strip()
-CACHE_SECONDS    = max(60, int(os.environ.get("CACHE_SECONDS", "180")))
+CACHE_SECONDS    = max(60, int(os.environ.get("CACHE_SECONDS", "600")))
+# Floor for /usage?force=1 — the smallest gap between real upstream fetches even
+# when a client forces a refresh, so a mashed refresh button can't hit the limit.
+FORCE_MIN_SECONDS = max(10, int(os.environ.get("FORCE_MIN_SECONDS", "30")))
 USER_AGENT       = os.environ.get("USER_AGENT", "claude-code/2.1.0")
 CLIENT_ID        = os.environ.get(
     "OAUTH_CLIENT_ID", "9d1c250a-e61b-44d9-88ed-5944d1962f5e")
@@ -204,11 +207,15 @@ _cache_lock = threading.Lock()
 _cache: dict = {"body": None, "raw": None, "ts": 0.0, "stale": False}
 
 
-def get_usage() -> dict:
+def get_usage(force: bool = False) -> dict:
     with _cache_lock:
         now = time.time()
-        if _cache["body"] and now - _cache["ts"] < CACHE_SECONDS:
-            return _cache["body"]
+        # Serve cache unless it's older than the window — or, for a forced
+        # refresh, older than the (much smaller) force floor.
+        if _cache["body"]:
+            window = FORCE_MIN_SECONDS if force else CACHE_SECONDS
+            if now - _cache["ts"] < window:
+                return _cache["body"]
 
         try:
             token = get_access_token()
@@ -316,8 +323,10 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._send(401, {"error": "unauthorized"})
             return
+        force = self.path.split("?", 1)[1] if "?" in self.path else ""
+        force = "force=1" in force or "force=true" in force
         try:
-            self._send(200, get_usage())
+            self._send(200, get_usage(force=force))
         except Exception as e:                      # noqa: BLE001
             self._send(502, {"valid": False, "error": str(e)})
 

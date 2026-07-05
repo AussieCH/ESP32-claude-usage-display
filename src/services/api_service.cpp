@@ -158,9 +158,17 @@ static void parseProxyBlock(JsonObject obj, UsageBlock& block) {
              (const char*)(obj["resetsAt"] | ""));
 }
 
-bool apiFetchProxy(UsageData& out, const char* url, const char* token) {
+bool apiFetchProxy(UsageData& out, const char* url, const char* token, bool force) {
     out.valid = false;
     if (!url || !url[0]) return false;
+
+    // Append ?force=1 (or &force=1) so the proxy bypasses its cache and fetches
+    // fresh from Anthropic — used for the manual (button) refresh only.
+    char reqUrl[200];
+    if (force) {
+        snprintf(reqUrl, sizeof(reqUrl), "%s%sforce=1", url, strchr(url, '?') ? "&" : "?");
+        url = reqUrl;
+    }
 
     bool https = strncmp(url, "https://", 8) == 0;
 
