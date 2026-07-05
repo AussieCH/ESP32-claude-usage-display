@@ -35,8 +35,12 @@ Root X1. Home Assistant reads the same proxy locally.
 
 **Prerequisites**
 - A Home Assistant install (HA OS, Supervised, or Container).
-- Claude Code credentials for the proxy — a `~/.claude/.credentials.json` copied
-  from a machine where you run Claude Code (see [`../proxy/README.md`](../proxy/README.md)).
+- A Claude OAuth token for the proxy. Running the proxy on Home Assistant (with no
+  Claude login of its own), the simplest is a **static token**: on a machine that
+  has Claude Code, run `claude setup-token` and copy the `sk-ant-oat01-…` string.
+  See [Credentials](#credentials) below. (A `~/.claude/.credentials.json` file is
+  the other option, but on macOS that file doesn't exist — tokens live in the
+  Keychain — so the static token is the practical choice here.)
 - A [Tailscale](https://tailscale.com) account (free tier is enough).
 
 ---
@@ -71,9 +75,24 @@ Verify with `tailscale status` — the host should show a `100.x.y.z` tailnet IP
 
 ## 2. Run the proxy on the Home Assistant host
 
-The proxy (`proxy/claude_usage_proxy.py`) holds your Claude credentials, refreshes
-the OAuth token, and serves a slim JSON on port **8787**. Pick the option matching
-your install.
+The proxy (`proxy/claude_usage_proxy.py`) authenticates to Anthropic, serves a
+slim JSON on port **8787**, and keeps your credentials on the HA host.
+
+### Credentials
+
+The proxy needs a Claude OAuth token. Running it on Home Assistant, the practical
+choice is a **static token** — no file, no second host:
+
+1. On a machine that has Claude Code, run `claude setup-token`.
+2. Authorize in the browser; copy the printed `sk-ant-oat01-…`.
+3. Set it as the proxy's `STATIC_ACCESS_TOKEN` (env var, or `static_access_token`
+   in the add-on config below).
+
+> The alternative is an auto-refreshing `~/.claude/.credentials.json`, but that
+> file only exists on **Linux** — on macOS the tokens live in the Keychain and
+> `claude /login` won't create it. So on a Mac, use the static token. If the usage
+> endpoint rejects the static token (HTTP 401), fall back to a credentials file
+> generated on a Linux host. See [`../proxy/README.md`](../proxy/README.md).
 
 ### Option A — Docker (HA Container, Supervised, or a companion Pi/NAS)
 
@@ -82,14 +101,15 @@ If Docker is available on the host, this is the simplest:
 ```bash
 git clone https://github.com/AussieCH/ESP32-claude-usage-display.git
 cd ESP32-claude-usage-display/proxy
-mkdir data && cp ~/.claude/.credentials.json data/
-# set a strong AUTH_TOKEN in docker-compose.yml, e.g. openssl rand -hex 32
+# In docker-compose.yml set:
+#   STATIC_ACCESS_TOKEN: "sk-ant-oat01-..."   (from `claude setup-token`)
+#   AUTH_TOKEN:          "..."                 (e.g. openssl rand -hex 32)
 docker compose up -d
 curl -H "Authorization: Bearer <AUTH_TOKEN>" http://localhost:8787/usage
 ```
 
-See [`../proxy/README.md`](../proxy/README.md) for the full env-var reference and
-a systemd alternative.
+See [`../proxy/README.md`](../proxy/README.md) for the full env-var reference, the
+credentials-file variant, and a systemd alternative.
 
 ### Option B — Home Assistant OS local add-on (no host Docker access)
 
@@ -107,13 +127,14 @@ arch: [aarch64, amd64, armv7]
 init: false
 ports:
   "8787/tcp": 8787
-map:
-  - share:rw          # put .credentials.json in /share/claude/
+# map: [share:rw]        # only needed for the credentials-file variant (Linux)
 options:
   auth_token: ""
+  static_access_token: ""
   cache_seconds: 180
 schema:
   auth_token: str?
+  static_access_token: str?
   cache_seconds: int
 ```
 
@@ -132,19 +153,21 @@ CMD [ "/run.sh" ]
 ```sh
 #!/usr/bin/with-contenv bashio
 export AUTH_TOKEN="$(bashio::config 'auth_token')"
+export STATIC_ACCESS_TOKEN="$(bashio::config 'static_access_token')"
 export CACHE_SECONDS="$(bashio::config 'cache_seconds')"
-export CREDENTIALS_FILE="/share/claude/.credentials.json"
+# For the credentials-file variant instead of a static token, drop the line above
+# and use: export CREDENTIALS_FILE="/share/claude/.credentials.json"
 exec python3 /claude_usage_proxy.py
 ```
 
 **`claude_usage_proxy.py`** — copy it from this repo's `proxy/` folder.
 
 Then:
-1. Copy your credentials to `/share/claude/.credentials.json`.
-2. **Settings → Add-ons → Add-on Store → ⋮ → Check for updates** — the
+1. **Settings → Add-ons → Add-on Store → ⋮ → Check for updates** — the
    *Local add-ons* section now lists **Claude Usage Proxy**. Install it.
-3. In its **Configuration**, set `auth_token` (a strong random string) and start it.
-4. Check the **Log** for `[start] listening on 0.0.0.0:8787`.
+2. In its **Configuration**, set `static_access_token` (from `claude setup-token`)
+   and `auth_token` (a strong random string), then start it.
+3. Check the **Log** for `[start] listening on 0.0.0.0:8787, ... credentials: static token`.
 
 ---
 
