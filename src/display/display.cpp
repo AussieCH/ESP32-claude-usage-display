@@ -295,12 +295,13 @@ static void renderFrame() {
         const int CX = 78, CY = 102, RO = 60, RI = 47;
         fillRingArc(CX, CY, RO, RI, pm.available ? u * 3.6f : 0.0f, COL_TRACK, COL_BLUE);
 
-        // countdown to the proxy's next refresh (ticks down between fetches),
-        // drawn with the GLCD font first, before switching to the free font
+        // minutes until the proxy's next refresh — whole minutes only (a per-second
+        // value only updates on wink ticks, so it looked jumpy). Drawn with the
+        // GLCD font first, before switching to the free font.
         int32_t rem = (int32_t)g_lastData.nextRefreshSec - (int32_t)((millis() - g_fetchMillis) / 1000);
         if (rem < 0) rem = 0;
         char cd[8];
-        snprintf(cd, sizeof(cd), "%ld:%02ld", (long)(rem / 60), (long)(rem % 60));
+        snprintf(cd, sizeof(cd), "%dm", (int)((rem + 59) / 60));   // round up
         g_spr.setTextDatum(MC_DATUM);
         g_spr.setTextColor(COL_MUTED, COL_BG);
         g_spr.drawString(cd, CX, CY + 30, 2);
