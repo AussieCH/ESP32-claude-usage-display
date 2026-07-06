@@ -49,7 +49,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import ip_address
 from pathlib import Path
 
-PROXY_VERSION = "1.0.7"   # shown at startup, in /health, and the Server header
+PROXY_VERSION = "1.0.8"   # shown at startup, in /health, and the Server header
 
 # ── Configuration ────────────────────────────────────────────────────
 
@@ -67,6 +67,9 @@ FORCE_MIN_SECONDS = max(10, int(os.environ.get("FORCE_MIN_SECONDS", "30")))
 # Retry-After header asks for more) — keeps a rate-limit cooldown from snowballing.
 BACKOFF_429      = max(60, int(os.environ.get("BACKOFF_429", "1800")))
 BACKOFF_MAX      = 6 * 3600  # never back off longer than this, even if told to
+# A 429 from the token-refresh endpoint means we tripped its rate limit; retrying
+# every BACKOFF_429 keeps the cooldown alive, so back off hard and let it clear.
+REFRESH_BACKOFF  = min(BACKOFF_MAX, max(BACKOFF_429, int(os.environ.get("REFRESH_BACKOFF", "14400"))))
 USER_AGENT       = os.environ.get("USER_AGENT", "claude-code/2.1.0")
 CLIENT_ID        = os.environ.get(
     "OAUTH_CLIENT_ID", "9d1c250a-e61b-44d9-88ed-5944d1962f5e")
@@ -314,9 +317,11 @@ def get_usage(force: bool = False) -> dict:
             _cache["ts"] = now
             _cache["stale"] = True
             if e.code == 429:
-                wait = _retry_after_seconds(e)
+                url = getattr(e, "url", "") or ""
+                # Refresh-endpoint limits are slow to clear — back off hard there.
+                wait = REFRESH_BACKOFF if "oauth/token" in url else _retry_after_seconds(e)
                 _cache["retry_after"] = now + wait
-                log(f"[upstream] HTTP 429 from {getattr(e, 'url', '?')} — "
+                log(f"[upstream] HTTP 429 from {url or '?'} — "
                     f"backing off {int(wait)}s; "
                     f"rate-limit headers: {_ratelimit_headers(e) or 'none'}")
             else:
