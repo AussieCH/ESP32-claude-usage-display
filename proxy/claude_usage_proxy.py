@@ -49,7 +49,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import ip_address
 from pathlib import Path
 
-PROXY_VERSION = "1.0.5"   # shown at startup, in /health, and the Server header
+PROXY_VERSION = "1.0.6"   # shown at startup, in /health, and the Server header
 
 # ── Configuration ────────────────────────────────────────────────────
 
@@ -83,6 +83,8 @@ def log(msg: str) -> None:
 # ── OAuth credential handling ────────────────────────────────────────
 
 _cred_lock = threading.Lock()
+_oauth_cache: dict = {"data": None}   # in-memory creds, so a file-write failure
+                                      # can't force a refresh on every request
 
 
 def _read_credentials() -> dict:
@@ -124,7 +126,10 @@ def get_access_token(force_refresh: bool = False) -> str:
     if STATIC_TOKEN:
         return STATIC_TOKEN
     with _cred_lock:
-        data = _read_credentials()
+        # Use the in-memory copy once loaded; only read the file on first use.
+        # This keeps a refreshed token even if persisting it to disk fails,
+        # so a write error can't cause a refresh on every single request.
+        data = _oauth_cache["data"] or _read_credentials()
         oauth = data.get("claudeAiOauth") or data.get("oauth") or {}
         if not oauth.get("accessToken"):
             raise RuntimeError(
@@ -134,7 +139,12 @@ def get_access_token(force_refresh: bool = False) -> str:
         if force_refresh or expired:
             oauth = _refresh_access_token(oauth)
             data["claudeAiOauth"] = oauth
-            _write_credentials(data)
+            try:
+                _write_credentials(data)   # best-effort; memory copy is authoritative
+            except OSError as ex:
+                log(f"[oauth] warning: could not persist refreshed token ({ex}) "
+                    "— keeping it in memory")
+        _oauth_cache["data"] = data
         return oauth["accessToken"]
 
 # ── Upstream fetch + normalization ───────────────────────────────────
