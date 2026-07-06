@@ -12,6 +12,7 @@ struct UsageData {
     bool       valid;
     char       timestamp[20];  // device uptime when last fetched, e.g. "T+00:05:23"
     char       model[24];      // current model display name, e.g. "Fable"
+    uint16_t   nextRefreshSec; // seconds until the proxy next fetches fresh (0 if unknown)
     UsageBlock fiveHour;
     UsageBlock sevenDay;
     UsageBlock sevenDayOpus;
