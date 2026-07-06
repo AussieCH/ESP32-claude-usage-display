@@ -218,6 +218,7 @@ bool apiFetchProxy(UsageData& out, const char* url, const char* token, bool forc
     parseProxyBlock(doc["sevenDay"].as<JsonObject>(),     out.sevenDay);
     parseProxyBlock(doc["sevenDayOpus"].as<JsonObject>(), out.sevenDayOpus);
     snprintf(out.model, sizeof(out.model), "%s", (const char*)(doc["model"] | ""));
+    out.nextRefreshSec = (uint16_t)min((long)(doc["nextRefreshSec"] | 0), 65535L);
 
     if (doc["stale"] | false) Serial.println("[Proxy] serving stale cache");
 

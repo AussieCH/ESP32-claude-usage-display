@@ -20,6 +20,7 @@ static Settings  g_lastSettings;
 static bool      g_hasData = false;
 static bool      g_everRendered = false;   // real data shown at least once
 static bool      g_stale = false;          // showing last-good data during an error
+static uint32_t  g_fetchMillis = 0;        // millis() at the last successful fetch
 static uint8_t   g_animState = 0;
 
 // Backlight PWM (Arduino core 2.x LEDC API)
@@ -230,6 +231,7 @@ void displayRender(const UsageData& data, const Settings& s) {
     g_hasData      = true;
     g_everRendered = true;
     g_stale        = false;
+    g_fetchMillis  = millis();
     renderFrame();
 }
 
@@ -293,10 +295,15 @@ static void renderFrame() {
         const int CX = 78, CY = 102, RO = 60, RI = 47;
         fillRingArc(CX, CY, RO, RI, pm.available ? u * 3.6f : 0.0f, COL_TRACK, COL_BLUE);
 
-        // small "5h"/"7d" label (GLCD font) first, before switching fonts
+        // countdown to the proxy's next refresh (ticks down between fetches),
+        // drawn with the GLCD font first, before switching to the free font
+        int32_t rem = (int32_t)g_lastData.nextRefreshSec - (int32_t)((millis() - g_fetchMillis) / 1000);
+        if (rem < 0) rem = 0;
+        char cd[8];
+        snprintf(cd, sizeof(cd), "%ld:%02ld", (long)(rem / 60), (long)(rem % 60));
         g_spr.setTextDatum(MC_DATUM);
         g_spr.setTextColor(COL_MUTED, COL_BG);
-        g_spr.drawString(has5h ? "5h" : "7d", CX, CY + 30, 2);
+        g_spr.drawString(cd, CX, CY + 30, 2);
 
         // centre percentage in a smooth GFX font, colour by band, auto-fit
         char pct[8];

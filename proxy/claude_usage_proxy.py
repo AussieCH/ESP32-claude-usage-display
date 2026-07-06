@@ -49,7 +49,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import ip_address
 from pathlib import Path
 
-PROXY_VERSION = "1.0.6"   # shown at startup, in /health, and the Server header
+PROXY_VERSION = "1.0.7"   # shown at startup, in /health, and the Server header
 
 # ── Configuration ────────────────────────────────────────────────────
 
@@ -404,7 +404,12 @@ class Handler(BaseHTTPRequestHandler):
         force = self.path.split("?", 1)[1] if "?" in self.path else ""
         force = "force=1" in force or "force=true" in force
         try:
-            self._send(200, get_usage(force=force))
+            body = dict(get_usage(force=force))
+            # seconds until the proxy will next fetch fresh data (cache expiry,
+            # or the 429 backoff if that's later) — a hint for the device countdown
+            next_at = max(_cache["ts"] + CACHE_SECONDS, _cache["retry_after"])
+            body["nextRefreshSec"] = max(0, int(round(next_at - time.time())))
+            self._send(200, body)
         except Exception as e:                      # noqa: BLE001
             self._send(502, {"valid": False, "error": str(e)})
 
