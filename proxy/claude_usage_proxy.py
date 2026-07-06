@@ -49,7 +49,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import ip_address
 from pathlib import Path
 
-PROXY_VERSION = "1.0.4"   # shown at startup, in /health, and the Server header
+PROXY_VERSION = "1.0.5"   # shown at startup, in /health, and the Server header
 
 # ── Configuration ────────────────────────────────────────────────────
 
@@ -221,19 +221,44 @@ def _stale() -> dict:
     return body
 
 
+def _ratelimit_headers(e: "urllib.error.HTTPError") -> dict:
+    """The Retry-After / anthropic-ratelimit-* headers from a response, for logging."""
+    if not e.headers:
+        return {}
+    return {k: v for k, v in e.headers.items()
+            if "ratelimit" in k.lower() or k.lower() == "retry-after"}
+
+
 def _retry_after_seconds(e: "urllib.error.HTTPError") -> float:
-    """Seconds to wait per the response's Retry-After header, else BACKOFF_429.
-    Accepts an integer (seconds) or an HTTP-date; clamped to BACKOFF_MAX."""
-    ra = e.headers.get("Retry-After") if e.headers else None
+    """How long to back off: prefer Retry-After, else the latest
+    anthropic-ratelimit-*-reset timestamp, else BACKOFF_429. Clamped to BACKOFF_MAX."""
+    now = datetime.now(timezone.utc)
+    hdrs = e.headers if e.headers else {}
+
+    ra = hdrs.get("Retry-After")
     if ra:
         ra = ra.strip()
         if ra.isdigit():
             return min(float(ra), BACKOFF_MAX)
         try:
-            when = parsedate_to_datetime(ra)
-            return max(0.0, min((when - datetime.now(timezone.utc)).total_seconds(), BACKOFF_MAX))
+            return max(0.0, min((parsedate_to_datetime(ra) - now).total_seconds(), BACKOFF_MAX))
         except (TypeError, ValueError):
             pass
+
+    # Anthropic returns reset timestamps per limited dimension — wait for the latest.
+    latest = 0.0
+    for k, v in (hdrs.items() if hdrs else []):
+        if k.lower().startswith("anthropic-ratelimit") and k.lower().endswith("-reset"):
+            try:
+                when = datetime.fromisoformat(v.strip().replace("Z", "+00:00"))
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=timezone.utc)
+                latest = max(latest, (when - now).total_seconds())
+            except ValueError:
+                pass
+    if latest > 0:
+        return min(latest, BACKOFF_MAX)
+
     return float(BACKOFF_429)
 
 
@@ -281,7 +306,9 @@ def get_usage(force: bool = False) -> dict:
             if e.code == 429:
                 wait = _retry_after_seconds(e)
                 _cache["retry_after"] = now + wait
-                log(f"[upstream] HTTP 429 — backing off {int(wait)}s (no upstream until then)")
+                log(f"[upstream] HTTP 429 from {getattr(e, 'url', '?')} — "
+                    f"backing off {int(wait)}s; "
+                    f"rate-limit headers: {_ratelimit_headers(e) or 'none'}")
             else:
                 log(f"[upstream] HTTP {e.code}: {e.reason}")
             if _cache["body"]:
