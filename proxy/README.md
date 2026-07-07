@@ -42,6 +42,31 @@ Then get a `.credentials.json` (`{"claudeAiOauth":{"accessToken":…,"refreshTok
 Point `CREDENTIALS_FILE` at the file. The proxy refreshes the access token itself,
 so it needs **write access** to persist rotated tokens.
 
+## Token renewal & recovery
+
+The subscription **access token expires ~every 8 h**. The proxy renews it on its own
+using the refresh token — proactively `REFRESH_LEAD` (2 h) before expiry, while the
+current token is still a valid fallback, so a single failed attempt never leaves you
+with an expired token. The renewed token is kept in memory and written back to the
+credentials file. In normal operation this is fully autonomous — no manual steps.
+
+**Watch out for the refresh rate limit.** The token-refresh endpoint
+(`console.anthropic.com/v1/oauth/token`) is rate-limited on a rolling window. If it
+gets hammered — e.g. the proxy restart-loops, or many refreshes fire in a short time
+— it starts returning **429** and can stay limited for many hours. The proxy defends
+against this (in-memory token so a write failure can't cause refresh-per-request, and
+a long `REFRESH_BACKOFF` so retries don't keep the window from draining), so **don't
+restart/rebuild the add-on repeatedly** — each restart drops the in-memory token and
+forces a fresh refresh.
+
+**Recovery if refreshes are stuck at 429** (log shows `HTTP 429 from …/oauth/token`,
+display frozen): the refresh endpoint is in a cooldown. Get a fresh token the way it
+was first set up — `claude auth login --claudeai` (a browser login uses a *different*
+grant that isn't affected), export it (Keychain on macOS), replace
+`/share/claude/.credentials.json`, and **restart** the add-on. That token is valid ~8 h
+with no refresh needed, which both restores the display and gives the refresh endpoint
+the quiet time it needs to drain and clear. After it clears, renewal is autonomous again.
+
 ## Run
 
 **Docker (credentials file):**
@@ -65,7 +90,9 @@ curl -H "Authorization: Bearer <AUTH_TOKEN>" http://localhost:8787/usage
 | `AUTH_TOKEN` | *(empty)* | Required Bearer token for `/usage`; if empty, only private/loopback clients are served |
 | `CACHE_SECONDS` | `600` | Seconds a normal poll may serve cached data (10 min keeps well clear of the rate limit) |
 | `FORCE_MIN_SECONDS` | `30` | Floor for `GET /usage?force=1` — smallest gap between real upstream fetches even when forced |
-| `BACKOFF_429` | `1800` | On HTTP 429, seconds to leave upstream alone (unless `Retry-After` asks for longer) so a rate-limit cooldown can't snowball |
+| `BACKOFF_429` | `1800` | On a 429 from the **usage** endpoint, seconds to leave it alone (unless `Retry-After` asks for longer) |
+| `REFRESH_BACKOFF` | `14400` | On a 429 from the **token-refresh** endpoint, seconds to back off. Its rate limit is a rolling window, so long backoff (4 h) lets it drain instead of being kept alive by frequent retries |
+| `REFRESH_LEAD` | `7200` | Renew the access token this many seconds **before** it expires, while the current one is still a valid fallback (2 h) — see Token renewal |
 | `STATIC_ACCESS_TOKEN` | *(empty)* | Static token as-is (skips file + refresh); **403s on the usage endpoint — see Credentials** |
 | `PORT` / `BIND` | `8787` / `0.0.0.0` | Listen port / address |
 

@@ -21,9 +21,15 @@ Environment:
                          read from X-Forwarded-For, trusted only from a
                          loopback peer). Set it anyway when exposing via Funnel.
     CREDENTIALS_FILE     Claude Code credentials JSON    (default ~/.claude/.credentials.json)
-    STATIC_ACCESS_TOKEN  use this token as-is, skip file + refresh (optional)
-    CACHE_SECONDS        min seconds between upstream calls (default 180;
-                         do not lower this — the endpoint rate-limits hard)
+    STATIC_ACCESS_TOKEN  use this token as-is, skip file + refresh; 403s on the
+                         usage endpoint (inference-scoped) — use credentials file
+    CACHE_SECONDS        seconds a normal poll may serve cached data (default 600)
+    FORCE_MIN_SECONDS    floor between real fetches for GET /usage?force=1 (default 30)
+    BACKOFF_429          backoff after a usage-endpoint 429 (default 1800)
+    REFRESH_BACKOFF      backoff after a token-refresh 429 (default 14400 = 4 h; its
+                         rolling-window limit needs long rests to drain and clear)
+    REFRESH_LEAD         renew the access token this many seconds before expiry, while
+                         it's still a valid fallback (default 7200 = 2 h)
     USER_AGENT           upstream User-Agent             (default claude-code/2.1.0)
     OAUTH_CLIENT_ID      client id for token refresh
                          (default: Claude Code's public client id)
