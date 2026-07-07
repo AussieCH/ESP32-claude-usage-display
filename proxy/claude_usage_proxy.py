@@ -55,7 +55,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import ip_address
 from pathlib import Path
 
-PROXY_VERSION = "1.0.11"   # shown at startup, in /health, and the Server header
+PROXY_VERSION = "1.0.12"   # shown at startup, in /health, and the Server header
 
 # ── Configuration ────────────────────────────────────────────────────
 
@@ -100,8 +100,10 @@ def log(msg: str) -> None:
 # ── OAuth credential handling ────────────────────────────────────────
 
 _cred_lock = threading.Lock()
-_oauth_cache: dict = {"data": None}   # in-memory creds, so a file-write failure
-                                      # can't force a refresh on every request
+_oauth_cache: dict = {"data": None,          # in-memory creds, so a file-write failure
+                                             # can't force a refresh on every request
+                      "refresh_after": 0.0}  # don't attempt another refresh before this
+                                             # (backoff after a refresh 429)
 
 
 def _read_credentials() -> dict:
@@ -152,14 +154,19 @@ def get_access_token(force_refresh: bool = False) -> str:
             raise RuntimeError(
                 f"no accessToken in {CREDENTIALS_FILE} — log in with "
                 "'claude /login' on this machine or copy the file here")
-        now_ms   = int(time.time() * 1000)
+        now      = time.time()
+        now_ms   = int(now * 1000)
         exp      = oauth.get("expiresAt", 0)
         unusable = exp <= now_ms + 60_000                       # token gone / about to be
         due      = force_refresh or exp <= now_ms + REFRESH_LEAD * 1000   # refresh early
-        if due:
+        # After a refresh 429 we must not retry every fetch (that keeps the refresh
+        # endpoint's rolling rate limit alive) — honor a backoff. But if the token
+        # is actually unusable we have no choice but to try regardless.
+        if due and (unusable or now >= _oauth_cache["refresh_after"]):
             try:
                 oauth = _refresh_access_token(oauth)
                 data["claudeAiOauth"] = oauth
+                _oauth_cache["refresh_after"] = 0.0
                 try:
                     _write_credentials(data)   # best-effort; memory copy is authoritative
                 except OSError as ex:
@@ -168,8 +175,10 @@ def get_access_token(force_refresh: bool = False) -> str:
             except Exception as ex:                             # noqa: BLE001
                 if unusable:
                     raise   # no valid token left to fall back on
-                log(f"[oauth] early refresh failed ({ex}); current token still valid "
-                    f"~{int((exp - now_ms) / 60000)} min — will retry on the next fetch")
+                _oauth_cache["refresh_after"] = now + REFRESH_BACKOFF
+                log(f"[oauth] early refresh failed ({ex}); token still valid "
+                    f"~{int((exp - now_ms) / 60000)} min — next attempt in "
+                    f"{int(REFRESH_BACKOFF / 60)} min")
         _oauth_cache["data"] = data
         return oauth["accessToken"]
 
