@@ -68,6 +68,12 @@ python3 -c "import json;print('ok:', list(json.load(open('/share/claude/.credent
 The proxy needs **write** access to this file so it can persist refreshed tokens
 (handled by the `map` in the add-on below).
 
+> **This is a one-time setup.** The proxy renews the token automatically from here
+> on. Only if the token-refresh endpoint gets rate-limited (log shows repeated
+> `HTTP 429 from …/oauth/token`, display frozen) do you repeat this step to drop in a
+> fresh token — see [Token renewal & recovery](../proxy/README.md#token-renewal--recovery).
+> Avoid restart-looping the add-on; each restart forces a token refresh.
+
 ---
 
 ## 2. Install Tailscale in Home Assistant
