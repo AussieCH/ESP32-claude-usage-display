@@ -49,7 +49,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import ip_address
 from pathlib import Path
 
-PROXY_VERSION = "1.0.9"   # shown at startup, in /health, and the Server header
+PROXY_VERSION = "1.0.10"   # shown at startup, in /health, and the Server header
 
 # ── Configuration ────────────────────────────────────────────────────
 
@@ -72,6 +72,10 @@ BACKOFF_MAX      = 6 * 3600  # never back off longer than this, even if told to
 # endpoint proves stubbornly rate-limited. (Does not affect data freshness —
 # that's CACHE_SECONDS; token refresh is a background ~8-hourly event.)
 REFRESH_BACKOFF  = min(BACKOFF_MAX, max(60, int(os.environ.get("REFRESH_BACKOFF", str(BACKOFF_429)))))
+# Refresh the access token this many seconds BEFORE it expires, while the current
+# one is still a valid fallback — gives several retry chances so a transient
+# refresh hiccup never leaves us with an expired token (no manual re-login needed).
+REFRESH_LEAD     = max(60, int(os.environ.get("REFRESH_LEAD", "7200")))   # 2 h
 USER_AGENT       = os.environ.get("USER_AGENT", "claude-code/2.1.0")
 CLIENT_ID        = os.environ.get(
     "OAUTH_CLIENT_ID", "9d1c250a-e61b-44d9-88ed-5944d1962f5e")
@@ -140,15 +144,24 @@ def get_access_token(force_refresh: bool = False) -> str:
             raise RuntimeError(
                 f"no accessToken in {CREDENTIALS_FILE} — log in with "
                 "'claude /login' on this machine or copy the file here")
-        expired = oauth.get("expiresAt", 0) <= int(time.time() * 1000) + 60_000
-        if force_refresh or expired:
-            oauth = _refresh_access_token(oauth)
-            data["claudeAiOauth"] = oauth
+        now_ms   = int(time.time() * 1000)
+        exp      = oauth.get("expiresAt", 0)
+        unusable = exp <= now_ms + 60_000                       # token gone / about to be
+        due      = force_refresh or exp <= now_ms + REFRESH_LEAD * 1000   # refresh early
+        if due:
             try:
-                _write_credentials(data)   # best-effort; memory copy is authoritative
-            except OSError as ex:
-                log(f"[oauth] warning: could not persist refreshed token ({ex}) "
-                    "— keeping it in memory")
+                oauth = _refresh_access_token(oauth)
+                data["claudeAiOauth"] = oauth
+                try:
+                    _write_credentials(data)   # best-effort; memory copy is authoritative
+                except OSError as ex:
+                    log(f"[oauth] warning: could not persist refreshed token ({ex}) "
+                        "— keeping it in memory")
+            except Exception as ex:                             # noqa: BLE001
+                if unusable:
+                    raise   # no valid token left to fall back on
+                log(f"[oauth] early refresh failed ({ex}); current token still valid "
+                    f"~{int((exp - now_ms) / 60000)} min — will retry on the next fetch")
         _oauth_cache["data"] = data
         return oauth["accessToken"]
 
