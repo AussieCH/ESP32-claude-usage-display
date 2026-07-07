@@ -110,7 +110,7 @@ wget -O claude_usage_proxy.py https://raw.githubusercontent.com/AussieCH/ESP32-c
 
 cat > config.yaml <<'EOF'
 name: Claude Usage Proxy
-version: "1.0.11"
+version: "1.0.12"
 slug: claude_usage_proxy
 description: Serves Claude usage as JSON for the ESP32 dashboard
 arch:
@@ -164,7 +164,7 @@ chmod +x run.sh
    Claude token. Save.
 3. **Start**, and check the **Log** for:
    ```
-   [start] claude-usage-proxy v1.0.11 — listening on 0.0.0.0:8787, cache 600s, credentials: /share/claude/.credentials.json
+   [start] claude-usage-proxy v1.0.12 — listening on 0.0.0.0:8787, cache 600s, credentials: /share/claude/.credentials.json
    ```
 
 > **Gotcha — always Reload before Rebuild.** Local add-on `config.yaml` changes
