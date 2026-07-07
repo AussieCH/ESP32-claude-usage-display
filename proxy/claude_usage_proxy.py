@@ -49,7 +49,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import ip_address
 from pathlib import Path
 
-PROXY_VERSION = "1.0.10"   # shown at startup, in /health, and the Server header
+PROXY_VERSION = "1.0.11"   # shown at startup, in /health, and the Server header
 
 # ── Configuration ────────────────────────────────────────────────────
 
@@ -67,11 +67,13 @@ FORCE_MIN_SECONDS = max(10, int(os.environ.get("FORCE_MIN_SECONDS", "30")))
 # Retry-After header asks for more) — keeps a rate-limit cooldown from snowballing.
 BACKOFF_429      = max(60, int(os.environ.get("BACKOFF_429", "1800")))
 BACKOFF_MAX      = 6 * 3600  # never back off longer than this, even if told to
-# How long to wait before re-trying a token refresh that got 429'd. Same as the
-# normal backoff by default so recovery is quick; raise it only if the refresh
-# endpoint proves stubbornly rate-limited. (Does not affect data freshness —
-# that's CACHE_SECONDS; token refresh is a background ~8-hourly event.)
-REFRESH_BACKOFF  = min(BACKOFF_MAX, max(60, int(os.environ.get("REFRESH_BACKOFF", str(BACKOFF_429)))))
+# How long to wait before re-trying a token refresh that got 429'd. The refresh
+# endpoint's rate limit is a rolling window, so frequent retries keep it alive —
+# back off HARD (4 h) so it can drain and clear. This does NOT slow the display:
+# data freshness is CACHE_SECONDS, and REFRESH_LEAD renews the token early while
+# the current one is still valid, so refreshes only fail visibly if the endpoint
+# is actually limited (and then retrying sooner wouldn't help anyway).
+REFRESH_BACKOFF  = min(BACKOFF_MAX, max(60, int(os.environ.get("REFRESH_BACKOFF", "14400"))))
 # Refresh the access token this many seconds BEFORE it expires, while the current
 # one is still a valid fallback — gives several retry chances so a transient
 # refresh hiccup never leaves us with an expired token (no manual re-login needed).
