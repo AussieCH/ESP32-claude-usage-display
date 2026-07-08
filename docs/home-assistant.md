@@ -68,11 +68,15 @@ python3 -c "import json;print('ok:', list(json.load(open('/share/claude/.credent
 The proxy needs **write** access to this file so it can persist refreshed tokens
 (handled by the `map` in the add-on below).
 
-> **This is a one-time setup.** The proxy renews the token automatically from here
-> on. Only if the token-refresh endpoint gets rate-limited (log shows repeated
-> `HTTP 429 from …/oauth/token`, display frozen) do you repeat this step to drop in a
-> fresh token — see [Token renewal & recovery](../proxy/README.md#token-renewal--recovery).
-> Avoid restart-looping the add-on; each restart forces a token refresh.
+> **Token renewal — read this.** The proxy tries to renew the ~8 h access token on its
+> own, but Anthropic **rate-limits the refresh grant hard for third-party tools**
+> (persistent `HTTP 429 from …/oauth/token`, can last days — a known ecosystem-wide
+> limit, not a bug here). When that happens the display freezes on the last values.
+> Recovery is one command: `scripts/refresh-token.sh` pushes a fresh browser-login
+> token to the proxy's `POST /credentials` (no restart) — see
+> [Token renewal & recovery](../proxy/README.md#token-renewal--recovery). **Don't
+> restart-loop the add-on** — each restart forces another refresh attempt and never
+> helps.
 
 ---
 
@@ -110,7 +114,7 @@ wget -O claude_usage_proxy.py https://raw.githubusercontent.com/AussieCH/ESP32-c
 
 cat > config.yaml <<'EOF'
 name: Claude Usage Proxy
-version: "1.0.12"
+version: "1.0.13"
 slug: claude_usage_proxy
 description: Serves Claude usage as JSON for the ESP32 dashboard
 arch:
@@ -164,7 +168,7 @@ chmod +x run.sh
    Claude token. Save.
 3. **Start**, and check the **Log** for:
    ```
-   [start] claude-usage-proxy v1.0.12 — listening on 0.0.0.0:8787, cache 600s, credentials: /share/claude/.credentials.json
+   [start] claude-usage-proxy v1.0.13 — listening on 0.0.0.0:8787, cache 600s, credentials: /share/claude/.credentials.json
    ```
 
 > **Gotcha — always Reload before Rebuild.** Local add-on `config.yaml` changes
@@ -270,6 +274,7 @@ rest:
 | `docker exec … "tailscale": executable file not found` | The binary is at `/opt/tailscale` — call it with the full path. |
 | `curl localhost:8787` from the Web Terminal → connection reset | Each add-on is a separate container; `localhost` isn't the proxy. Use `http://<ha-ip>:8787`. |
 | Display shows `Proxy Error` right after boot | NTP time not set yet (needed for the cert check) — resolves in ~30 s. |
+| Display frozen on old values; log shows repeated `429 from …/oauth/token` | Auto-refresh is rate-limited by Anthropic (see section 1). Push a fresh token: `scripts/refresh-token.sh` (or `POST /credentials`). Do **not** restart-loop the add-on. |
 | `funnel status` shows a URL but requests hang | The Tailscale add-on can't reach the proxy port. Confirm **`userspace_networking: false`** and that the proxy publishes `8787` on the host. |
 
 > **Deployed differently?** On Home Assistant Supervised/Container (a host with

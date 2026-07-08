@@ -9,8 +9,14 @@ The Claude OAuth credentials never leave this host — clients only ever
 see utilization percentages and reset timestamps.
 
 Endpoints:
-    GET /usage    normalized usage JSON (Bearer auth if AUTH_TOKEN is set)
-    GET /health   liveness probe, no auth
+    GET  /usage        normalized usage JSON (Bearer auth if AUTH_TOKEN is set)
+    POST /credentials  install a fresh subscription token (Bearer auth). Writes
+                       the credentials file AND updates the in-memory cache, so it
+                       takes effect immediately — no restart, and without calling
+                       the (rate-limited) refresh endpoint. Use it to drop in a
+                       token from a browser login elsewhere when auto-refresh is
+                       stuck at 429. See scripts/refresh-token.sh.
+    GET  /health       liveness probe, no auth
 
 Environment:
     PORT                 listen port                     (default 8787)
@@ -55,7 +61,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import ip_address
 from pathlib import Path
 
-PROXY_VERSION = "1.0.12"   # shown at startup, in /health, and the Server header
+PROXY_VERSION = "1.0.13"   # shown at startup, in /health, and the Server header
 
 # ── Configuration ────────────────────────────────────────────────────
 
@@ -181,6 +187,47 @@ def get_access_token(force_refresh: bool = False) -> str:
                     f"{int(REFRESH_BACKOFF / 60)} min")
         _oauth_cache["data"] = data
         return oauth["accessToken"]
+
+
+def install_credentials(supplied: dict) -> dict:
+    """Replace the stored credentials with a freshly-supplied blob (from a
+    browser `claude auth login` on another machine).
+
+    Anthropic rate-limits the refresh-token grant hard for third-party clients,
+    so auto-refresh can stay stuck at 429 for a long time. This lets you push a
+    fresh access token (obtained via the browser login, a *different* grant that
+    isn't limited) straight in: it writes the credentials file AND updates the
+    in-memory cache, so it takes effect on the next fetch — no restart, and
+    without touching the refresh endpoint. Returns a token-free summary.
+    """
+    oauth = supplied.get("claudeAiOauth") or supplied.get("oauth")
+    if oauth is None and supplied.get("accessToken"):
+        oauth = supplied                      # bare oauth object — wrap it
+        supplied = {"claudeAiOauth": oauth}
+    if not isinstance(oauth, dict) or not oauth.get("accessToken"):
+        raise ValueError("no accessToken in supplied credentials")
+
+    with _cred_lock:
+        try:
+            _write_credentials(supplied)
+            persisted = True
+        except OSError as ex:
+            log(f"[creds] warning: could not persist to {CREDENTIALS_FILE} "
+                f"({ex}) — keeping the new token in memory only")
+            persisted = False
+        _oauth_cache["data"] = supplied
+        _oauth_cache["refresh_after"] = 0.0   # fresh token → allow refreshes again
+    # Let the next /usage call fetch immediately with the new token.
+    with _cache_lock:
+        _cache["retry_after"] = 0.0
+        _cache["ts"] = 0.0
+
+    exp    = int(oauth.get("expiresAt", 0))
+    exp_in = max(0, int((exp - time.time() * 1000) / 60000)) if exp else 0
+    log(f"[creds] new credentials installed — expires in ~{exp_in} min, "
+        f"persisted: {persisted}")
+    return {"ok": True, "persisted": persisted, "expiresInMin": exp_in,
+            "keys": sorted(oauth.keys())}
 
 # ── Upstream fetch + normalization ───────────────────────────────────
 
@@ -449,6 +496,36 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, body)
         except Exception as e:                      # noqa: BLE001
             self._send(502, {"valid": False, "error": str(e)})
+
+    def do_POST(self) -> None:                      # noqa: N802
+        if self.path.split("?")[0] != "/credentials":
+            self._send(404, {"error": "not found"})
+            return
+        if not self._authorized():
+            self._send(401, {"error": "unauthorized"})
+            return
+        if STATIC_TOKEN:
+            self._send(409, {"error": "proxy runs in STATIC_ACCESS_TOKEN mode; "
+                                      "credential upload is disabled"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if length <= 0 or length > 65536:
+            self._send(400, {"error": "missing or oversized body"})
+            return
+        try:
+            supplied = json.loads(self.rfile.read(length).decode())
+        except (ValueError, UnicodeDecodeError) as e:
+            self._send(400, {"error": f"invalid JSON: {e}"})
+            return
+        try:
+            self._send(200, install_credentials(supplied))
+        except ValueError as e:                     # malformed credentials
+            self._send(400, {"error": str(e)})
+        except Exception as e:                      # noqa: BLE001
+            self._send(500, {"error": str(e)})
 
     def log_message(self, fmt, *args):              # quiet default access log
         pass
