@@ -44,28 +44,44 @@ so it needs **write access** to persist rotated tokens.
 
 ## Token renewal & recovery
 
-The subscription **access token expires ~every 8 h**. The proxy renews it on its own
-using the refresh token — proactively `REFRESH_LEAD` (2 h) before expiry, while the
-current token is still a valid fallback, so a single failed attempt never leaves you
-with an expired token. The renewed token is kept in memory and written back to the
-credentials file. In normal operation this is fully autonomous — no manual steps.
+The subscription **access token expires ~every 8 h**. The proxy *tries* to renew it on
+its own using the refresh token — proactively `REFRESH_LEAD` (2 h) before expiry, while
+the current token is still a valid fallback. When that works, it's autonomous.
 
-**Watch out for the refresh rate limit.** The token-refresh endpoint
-(`console.anthropic.com/v1/oauth/token`) is rate-limited on a rolling window. If it
-gets hammered — e.g. the proxy restart-loops, or many refreshes fire in a short time
-— it starts returning **429** and can stay limited for many hours. The proxy defends
-against this (in-memory token so a write failure can't cause refresh-per-request, and
-a long `REFRESH_BACKOFF` so retries don't keep the window from draining), so **don't
-restart/rebuild the add-on repeatedly** — each restart drops the in-memory token and
-forces a fresh refresh.
+> **Reality check — auto-refresh is often rate-limited.** Anthropic rate-limits the
+> **refresh-token grant** (`console.anthropic.com/v1/oauth/token`) hard for third-party
+> clients: it returns a persistent **429 `rate_limit_error`** (often with `retry-after: 0`)
+> that can stay stuck for **days** and does **not** drain by waiting. This is a known,
+> ecosystem-wide limit that hits every third-party tool polling the OAuth endpoints
+> ([claude-code#30930](https://github.com/anthropics/claude-code/issues/30930)), not a
+> bug in this proxy — an initial retry storm can also earn a long per-account penalty.
+> The proxy defends what it can (in-memory token so a write failure can't cause
+> refresh-per-request; a long `REFRESH_BACKOFF` so it pokes the endpoint at most ~every
+> 4 h instead of feeding the limit), so **don't restart/rebuild the add-on repeatedly** —
+> each restart drops the in-memory token and forces another refresh attempt. But no
+> backoff clears the limit; only Anthropic relaxing it (or the penalty aging out) does.
 
-**Recovery if refreshes are stuck at 429** (log shows `HTTP 429 from …/oauth/token`,
-display frozen): the refresh endpoint is in a cooldown. Get a fresh token the way it
-was first set up — `claude auth login --claudeai` (a browser login uses a *different*
-grant that isn't affected), export it (Keychain on macOS), replace
-`/share/claude/.credentials.json`, and **restart** the add-on. That token is valid ~8 h
-with no refresh needed, which both restores the display and gives the refresh endpoint
-the quiet time it needs to drain and clear. After it clears, renewal is autonomous again.
+**Recovery — push a fresh token (one command).** A **browser** login
+(`claude auth login --claudeai`) uses a *different* grant that is **not** rate-limited
+and yields a token valid ~8 h. The proxy exposes **`POST /credentials`** to install such
+a token instantly — it writes the credentials file **and** updates the in-memory cache,
+so no restart and no refresh call is needed:
+
+```bash
+# macOS — token lives in the Keychain
+security find-generic-password -s "Claude Code-credentials" -w \
+  | curl -fsS -X POST "$PROXY_URL/credentials" \
+      -H "Authorization: Bearer $PROXY_TOKEN" --data-binary @-
+```
+
+`scripts/refresh-token.sh` wraps this (checks the Keychain token's expiry, re-runs the
+browser login only if it's stale, then pushes) — set `PROXY_URL`/`PROXY_TOKEN` and run
+it whenever the display is frozen. If the refresh limit ever clears, auto-refresh
+resumes on its own with no change needed.
+
+`POST /credentials` requires the same `AUTH_TOKEN` Bearer as `/usage`, is refused in
+`STATIC_ACCESS_TOKEN` mode, and never echoes the token back (it returns only
+`{ok, persisted, expiresInMin, keys}`).
 
 ## Run
 
